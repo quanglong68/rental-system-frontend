@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { animate, motion, useMotionValue, useTransform } from "motion/react";
-import { Icon, toVNTime, vnd } from "../../ui";
+import { Icon, toVNTime, vnd } from "../../components/ui";
 import { HomeExtras } from "./MyHomeExtras";
 import { segments, splitDaily } from "../../lib/split";
 

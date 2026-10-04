@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { segments, splitDaily } from "../lib/split";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "../ui";
+import { segments, splitDaily } from "../../lib/split";
+import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "../../components/ui";
 
 type Status = "Nháp" | "Chờ ký" | "Hiệu lực" | "Sắp hết hạn" | "Đã thanh lý";
 type Occupant = { name: string; phone: string; from: string; to?: string; rep?: boolean };

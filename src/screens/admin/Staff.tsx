@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, useToast, type Tone } from "../ui";
+import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, useToast, type Tone } from "../../components/ui";
 
 const allBuildings = ["The Fern House", "Căn hộ An Nhiên", "Mộc Residence", "Lam Garden"];
 type Member = (typeof staff)[number];

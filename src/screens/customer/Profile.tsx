@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLocation } from "react-router";
-import { toVNTime } from "../../ui";
+import { toVNTime } from "../../components/ui";
 import { useAuth } from "../../lib/auth";
-import { notiStore, useCxToast, useNotis, type NotiKind } from "./notifications";
+import { notiStore, useCxToast, useNotis, type NotiKind } from "../../mocks/notifications";
 
 const filters: ("Tất cả" | NotiKind)[] = ["Tất cả", "Hóa đơn", "Lịch hẹn", "Sửa chữa", "Ở ghép"];
 const ease = [0.22, 1, 0.36, 1] as const;

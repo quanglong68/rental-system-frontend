@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Drawer, Field, Icon, PageHead, Pill, Switch, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "../ui";
+import { Drawer, Field, Icon, PageHead, Pill, Switch, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "../../components/ui";
 
 type Status = "Đang thuê" | "Trống" | "Sắp trống" | "Bảo trì" | "Ở ghép";
 type Room = { code: string; status: Status; price: number; area: number; type: string; capacity: number };

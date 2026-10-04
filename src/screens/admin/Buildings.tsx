@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Toolbar, useToast, vnd } from "../ui";
+import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Toolbar, useToast, vnd } from "../../components/ui";
 
 const data = [
   { code: "FERN", name: "The Fern House", address: "112 Nguyễn Gia Trí, Bình Thạnh", floors: 7, rooms: 50, rented: 46, revenue: 186400000, manager: "Lê Quốc Bảo", staff: 6, image: "https://images.unsplash.com/photo-1762792013200-d474b123e1b8?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=700" },

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, PageHead, Pill, vnd } from "../../ui";
+import { Icon, PageHead, Pill, vnd } from "../../components/ui";
 
 const ELEC = 3500, WATER = 18000;
 const initial = [

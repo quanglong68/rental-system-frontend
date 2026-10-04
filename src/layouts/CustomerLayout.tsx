@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router";
-import { Icon, toVNTime } from "../../ui";
-import { notiStore, useNotis } from "./notifications";
-import { homeFor, useAuth } from "../../lib/auth";
-import "./customer.css";
+import { Icon, toVNTime } from "../components/ui";
+import { notiStore, useNotis } from "../mocks/notifications";
+import { homeFor, useAuth } from "../lib/auth";
+import "../screens/customer/customer.css";
 
 const publicTabs = [{ to: "/", label: "Khám phá", icon: "search" as const }];
 const memberTabs = [

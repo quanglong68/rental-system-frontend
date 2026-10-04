@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { segments, splitDaily } from "../lib/split";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Switch, Toolbar, useToast, vnd, type Tone } from "../ui";
+import { segments, splitDaily } from "../../lib/split";
+import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Switch, Toolbar, useToast, vnd, type Tone } from "../../components/ui";
 
 const invoices = [
   { id: "INV-1025-0402", room: "A.402", tenants: ["Hoàng Thị Mai", "Đỗ Minh Khoa"], days: [31, 22], rent: 4200000, elec: 612000, water: 180000, service: 300000, status: "Đã thu" },

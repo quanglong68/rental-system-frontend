@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, MiniStat, PageHead, Pill, vnd, type Tone } from "../../ui";
+import { Icon, MiniStat, PageHead, Pill, vnd, type Tone } from "../../components/ui";
 
 type Lead = { name: string; phone: string; want: string; budget: number; source: string; stage: string };
 const stages: { key: string; tone: Tone }[] = [{ key: "Mới", tone: "sky" }, { key: "Hẹn xem phòng", tone: "amber" }, { key: "Đặt cọc", tone: "violet" }, { key: "Ký hợp đồng", tone: "teal" }];

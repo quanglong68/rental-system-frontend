@@ -1,11 +1,11 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "motion/react";
-import { Icon, vnd } from "../../ui";
+import { Icon, vnd } from "../../components/ui";
 import { useNavigate } from "react-router";
-import { areas, buildings, roomTypes, rooms, type Room } from "./data";
+import { areas, buildings, roomTypes, rooms, type Room } from "../../mocks/data";
 import { haversine, HCM_CENTER } from "../../lib/geo";
 import { useAuth } from "../../lib/auth";
-import { bookingStore, slotHours, upcomingDays, vnToIso } from "./bookings";
+import { bookingStore, slotHours, upcomingDays, vnToIso } from "../../mocks/bookings";
 
 type R = Room & { km: number };
 const withKm: R[] = rooms.filter((r) => r.status === "ACTIVE").map((r) => ({ ...r, km: Math.round(haversine(HCM_CENTER, r) * 10) / 10 }));

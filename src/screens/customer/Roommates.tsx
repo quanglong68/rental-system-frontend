@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform, type PanInfo } from "motion/react";
-import { Icon, toVNTime, vnd } from "../../ui";
-import { useCxToast } from "./notifications";
+import { Icon, toVNTime, vnd } from "../../components/ui";
+import { useCxToast } from "../../mocks/notifications";
 
 const people = [
   { name: "Đặng Thu Trang", age: 24, job: "Nhân viên văn phòng", budget: 2500000, area: "Bình Thạnh", tags: ["Không hút thuốc", "Ngủ sớm", "Hay nấu ăn"], match: 92, img: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?crop=faces&fit=crop&w=700&h=900&q=80" },

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, MiniStat, PageHead, Pill, toVNTime, vnd, type Tone } from "../../ui";
+import { Icon, MiniStat, PageHead, Pill, toVNTime, vnd, type Tone } from "../../components/ui";
 
 const approvals = [
   { id: 1, type: "Yêu cầu thuê", who: "Nguyễn Lam", what: "Phòng B.305 · từ 05/10", by: "Sale Khánh Linh", tone: "sky" as Tone },

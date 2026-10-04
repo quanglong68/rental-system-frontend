@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, PageHead, Pill, Tabs, Toolbar, vnd } from "../ui";
+import { Icon, PageHead, Pill, Tabs, Toolbar, vnd } from "../../components/ui";
 
 const tenants = [
   { name: "Hoàng Thị Mai", phone: "0903 218 447", room: "A.402", building: "Fern House", since: "01/2026", debt: 0, verified: true },

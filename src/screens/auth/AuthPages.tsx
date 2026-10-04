@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { motion } from "motion/react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
-import { Icon } from "../../ui";
-import { DEMO_PASSWORD, demoAccounts, homeFor, useAuth } from "../../lib/auth";
+import { Icon } from "../../components/ui";
+import { DEMO_PASSWORD, demoAccounts } from "../../mocks/demoAccounts";
+import { homeFor, useAuth } from "../../lib/auth";
 import "./auth.css";
 
 const ease = [0.22, 1, 0.36, 1] as const;
