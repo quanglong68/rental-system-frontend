@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, PageHead, Pill, Tabs, toVNTime, type Tone } from "../../ui";
+import { Icon, PageHead, Pill, Tabs, toVNTime, type Tone } from "../../components/ui";
 
 type Task = { id: string; title: string; room: string; tenant: string; phone: string; prio: string; status: string; at: string; desc: string; steps: string[] };
 const tasks: Task[] = [

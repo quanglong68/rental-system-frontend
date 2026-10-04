@@ -1,4 +1,4 @@
-import { Icon, PageHead, vnd } from "../ui";
+import { Icon, PageHead, vnd } from "../../components/ui";
 
 const months = [{ m: "T5", r: 432 }, { m: "T6", r: 448 }, { m: "T7", r: 455 }, { m: "T8", r: 470 }, { m: "T9", r: 461 }, { m: "T10", r: 486 }];
 const byBuilding = [{ n: "The Fern House", v: 186.4 }, { n: "Căn hộ An Nhiên", v: 142.8 }, { n: "Mộc Residence", v: 101.5 }, { n: "Lam Garden", v: 55.5 }];

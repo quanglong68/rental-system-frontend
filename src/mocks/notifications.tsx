@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Icon } from "../../ui";
+import { Icon } from "../components/ui";
 
 export type NotiKind = "Hóa đơn" | "Lịch hẹn" | "Sửa chữa" | "Ở ghép";
 export type Noti = { id: string; kind: NotiKind; title: string; body: string; at: string; read: boolean };

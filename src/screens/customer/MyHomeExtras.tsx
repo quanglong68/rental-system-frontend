@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Icon, toVNTime, vnd } from "../../ui";
+import { Icon, toVNTime, vnd } from "../../components/ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 const invoices = [

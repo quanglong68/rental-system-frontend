@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Link } from "react-router";
-import { Icon, toVNTime, vnd } from "../../ui";
-import { bookingStore, useBookings, type ApptStatus, type ReqStatus } from "./bookings";
-import { useCxToast } from "./notifications";
+import { Icon, toVNTime, vnd } from "../../components/ui";
+import { bookingStore, useBookings, type ApptStatus, type ReqStatus } from "../../mocks/bookings";
+import { useCxToast } from "../../mocks/notifications";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 const reqTone: Record<ReqStatus, string> = { "Chờ duyệt": "", "Đã duyệt": "ok", "Từ chối": "bad", "Đã hủy": "mute" };

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { DEMO_PASSWORD, demoAccounts } from "../mocks/demoAccounts";
 
 export type Role = "ADMIN" | "QUAN_LY" | "KY_THUAT" | "SALE" | "CUSTOMER";
 export type User = { sub: string; fullName: string; role: Role; buildings?: string[] };
@@ -12,15 +13,6 @@ type Ctx = {
 
 const AuthContext = createContext<Ctx | null>(null);
 
-/** Tài khoản mẫu chỉ để xem giao diện theo từng vai trò */
-export const demoAccounts: User[] = [
-  { sub: "admin@nhaminh.vn", fullName: "Trần Minh Anh", role: "ADMIN" },
-  { sub: "quanly@nhaminh.vn", fullName: "Lê Quốc Bảo", role: "QUAN_LY", buildings: ["The Fern House"] },
-  { sub: "kythuat@nhaminh.vn", fullName: "Trần Minh", role: "KY_THUAT", buildings: ["Mộc Residence", "The Fern House"] },
-  { sub: "sale@nhaminh.vn", fullName: "Đinh Khánh Linh", role: "SALE", buildings: ["The Fern House"] },
-  { sub: "0903218447", fullName: "Hoàng Thị Mai", role: "CUSTOMER" },
-];
-export const DEMO_PASSWORD = "matkhau123";
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function AuthProvider({ children }: { children: ReactNode }) {

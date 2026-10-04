@@ -1,4 +1,4 @@
-import { Icon, PageHead, Pill, toVNTime, type Tone } from "../ui";
+import { Icon, PageHead, Pill, toVNTime, type Tone } from "../../components/ui";
 
 const cols: { title: string; tone: Tone; items: { id: string; title: string; room: string; prio: string; who?: string; at: string }[] }[] = [
   { title: "Mới tiếp nhận", tone: "coral", items: [

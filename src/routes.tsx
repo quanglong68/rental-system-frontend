@@ -1,5 +1,5 @@
 import { createBrowserRouter, Link } from "react-router";
-import CustomerLayout, { RequireCustomer } from "./screens/customer/CustomerApp";
+import CustomerLayout, { RequireCustomer } from "./layouts/CustomerLayout";
 import Explore from "./screens/customer/Explore";
 import MyHome from "./screens/customer/MyHome";
 import Repairs from "./screens/customer/Repairs";

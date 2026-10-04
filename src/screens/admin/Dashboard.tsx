@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon } from "../ui";
+import { Icon } from "../../components/ui";
 
 const activities = [
   { initials: "HT", color: "bg-amber-100 text-amber-700", name: "Hoàng Thị Mai", action: "đã thanh toán hóa đơn", detail: "HĐ-0425 · 3.650.000 ₫", time: "10 phút trước" },
