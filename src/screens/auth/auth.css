@@ -1,0 +1,28 @@
+.au { display:grid; min-height:100vh; grid-template-columns:1.05fr 1fr; background:#fff; }
+.au-art { position:relative; overflow:hidden; margin:14px; border-radius:30px; background:#e9ece7; }
+.au-art img { position:absolute; inset:0; height:100%; width:100%; object-fit:cover; }
+.au-art::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, #0e1a1f33, transparent 30%, #0e1a1fcc); }
+.au-brand { position:absolute; left:28px; top:26px; z-index:1; display:flex; align-items:center; gap:10px; color:#fff; font-family:"Newsreader", serif; font-size:22px; text-decoration:none; }
+.au-art blockquote { position:absolute; left:32px; right:32px; bottom:34px; z-index:1; margin:0; max-width:520px; color:#fff; font-family:"Newsreader", serif; font-size:clamp(24px, 2.4vw, 34px); line-height:1.2; }
+.au-art cite { display:block; margin-top:16px; font-family:"Be Vietnam Pro", sans-serif; font-size:13px; font-style:normal; opacity:.75; }
+.au-main { display:flex; align-items:center; justify-content:center; padding:40px 24px; }
+.au-form { width:100%; max-width:420px; }
+.au-back { display:inline-flex; align-items:center; gap:6px; color:var(--mute); font-size:13px; text-decoration:none; } .au-back svg { rotate:180deg; }
+.au-form h1 { margin:28px 0 10px; font-size:clamp(40px, 4vw, 56px); line-height:1; }
+.au-sub { margin:0 0 32px; color:var(--mute); font-size:15px; line-height:1.6; }
+.au-field { display:block; margin-bottom:16px; }
+.au-field > span { display:block; margin-bottom:7px; font-size:13px; font-weight:500; }
+.au-field > div { display:flex; align-items:center; border:1px solid var(--line); border-radius:14px; transition:border .2s, box-shadow .2s; }
+.au-field > div:focus-within { border-color:var(--ink); box-shadow:0 0 0 4px #0e1a1f0d; }
+.au-field input { min-width:0; flex:1; height:52px; border:0; background:none; padding:0 16px; font:inherit; font-size:15px; outline:0; }
+.au-field button { border:0; background:none; padding:0 16px; color:var(--mute); font-size:12px; font-weight:600; }
+.au-field.bad > div { border-color:#e0573b; } .au-field small { display:block; margin-top:6px; color:#c2412a; font-size:12px; }
+.au-error { margin:-2px 0 16px; border-radius:12px; background:#fdece8; padding:11px 14px; color:#b23a22; font-size:13px; }
+.au-meter { display:flex; align-items:center; gap:5px; margin:-6px 0 16px; } .au-meter i { height:4px; flex:1; border-radius:99px; background:#eceeea; transition:background .3s; }
+.au-meter i.on.s1 { background:#e0573b; } .au-meter i.on.s2 { background:#f0a830; } .au-meter i.on.s3, .au-meter i.on.s4 { background:#7cc520; }
+.au-meter span { width:80px; text-align:right; color:var(--mute); font-size:11px; }
+.au-alt { margin:22px 0 0; text-align:center; color:var(--mute); font-size:14px; } .au-alt a { color:var(--ink); font-weight:600; }
+.au-demo { margin-top:28px; border:1px dashed #d6dbd5; border-radius:16px; padding:14px; }
+.au-spin { height:18px; width:18px; border:2px solid #ffffff55; border-top-color:#fff; border-radius:50%; animation:au-spin .7s linear infinite; }
+@keyframes au-spin { to { transform:rotate(360deg); } }
+@media (max-width: 900px) { .au { grid-template-columns:1fr; } .au-art { display:none; } }

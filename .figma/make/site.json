@@ -1,0 +1,10 @@
+{
+  "description": "A comprehensive platform for room rental management, enabling users to post listings, schedule viewings, manage contracts, and handle maintenance requests efficiently.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
