@@ -51,7 +51,7 @@ function RoomSheet({ room, onClose }: { room: R; onClose: () => void }) {
   const days = useMemo(() => upcomingDays(5), []);
   const [day, setDay] = useState(days[0].ymd);
   const [slot, setSlot] = useState("");
-  const request = () => (sent ? navigate("/lich-hen") : user ? setPicking(true) : navigate("/dang-nhap?next=/"));
+  const request = () => (sent ? navigate("/requests") : user ? setPicking(true) : navigate("/login?next=/"));
   const confirm = () => {
     bookingStore.addRequest({ room: room.code, building: room.building, price: room.price, at: new Date().toISOString() }, vnToIso(day, slot));
     setPicking(false); setSent(true);
@@ -77,7 +77,7 @@ function RoomSheet({ room, onClose }: { room: R; onClose: () => void }) {
           </dl>
           <p className="text-sm leading-7 text-[#56636a]">Điện {vnd(3500)}/kWh · Nước {vnd(18000)}/m³. Hóa đơn hằng tháng tự động chia đều theo số người ở trong phòng.</p>
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <button className="cx-btn ghost" onClick={() => (user ? setPicking(true) : navigate("/dang-nhap?next=/"))}>Đặt lịch xem</button>
+            <button className="cx-btn ghost" onClick={() => (user ? setPicking(true) : navigate("/login?next=/"))}>Đặt lịch xem</button>
             <motion.button className="cx-btn" whileTap={{ scale: 0.96 }} onClick={request}>
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span key={String(sent)} initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -12, opacity: 0 }} className="flex items-center gap-2">

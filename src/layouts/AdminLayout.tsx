@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Navigate, NavLink, useNavigate, useParams } from "react-router";
+import { Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router";
 import { useAuth, type Role } from "../lib/auth";
 import { Icon, type IconName } from "../components/ui";
 import Dashboard from "../screens/admin/Dashboard";
@@ -17,23 +17,20 @@ import MeterReading from "../screens/staff/MeterReading";
 import TechTasks from "../screens/staff/TechTasks";
 import SalePipeline from "../screens/staff/SalePipeline";
 
-type NavItem = { label: string; icon: IconName; badge?: string };
+type NavItem = { label: string; path: string; icon: IconName; badge?: string };
 type StaffRole = Exclude<Role, "CUSTOMER">;
 
-/** "Phòng & Tin đăng" → "phong-tin-dang" */
-export const slug = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
 const adminNav: NavItem[] = [
-  { label: "Tổng quan", icon: "grid" },
-  { label: "Tòa nhà", icon: "building" },
-  { label: "Phòng & Tin đăng", icon: "door" },
-  { label: "Hợp đồng", icon: "contract" },
-  { label: "Tài chính", icon: "wallet" },
-  { label: "Bảo trì", icon: "tools", badge: "5" },
-  { label: "Tài sản", icon: "grid" },
-  { label: "Khách thuê & Ở ghép", icon: "users" },
-  { label: "Nhân sự", icon: "shield" },
-  { label: "Báo cáo", icon: "chart" },
+  { label: "Tổng quan", path: "overview", icon: "grid" },
+  { label: "Tòa nhà", path: "buildings", icon: "building" },
+  { label: "Phòng & Tin đăng", path: "rooms", icon: "door" },
+  { label: "Hợp đồng", path: "contracts", icon: "contract" },
+  { label: "Tài chính", path: "finance", icon: "wallet" },
+  { label: "Bảo trì", path: "maintenance", icon: "tools", badge: "5" },
+  { label: "Tài sản", path: "assets", icon: "grid" },
+  { label: "Khách thuê & Ở ghép", path: "tenants", icon: "users" },
+  { label: "Nhân sự", path: "staff", icon: "shield" },
+  { label: "Báo cáo", path: "reports", icon: "chart" },
 ];
 
 const activities = [
@@ -43,35 +40,49 @@ const activities = [
   { initials: "HN", color: "bg-emerald-100 text-emerald-700", name: "Hệ thống", action: "đã tạo tin đăng tự động", detail: "Phòng C.201 chuyển sang sắp trống", time: "2 giờ trước" },
 ];
 
-const roles: Record<StaffRole, { user: string; initials: string; title: string; scope: string; nav: NavItem[] }> = {
-  ADMIN: { user: "Trần Minh Anh", initials: "TA", title: "Quản trị viên", scope: "Toàn hệ thống", nav: adminNav },
+const roles: Record<StaffRole, { user: string; initials: string; title: string; scope: string; nav: NavItem[] }> = {  ADMIN: { user: "Trần Minh Anh", initials: "TA", title: "Quản trị viên", scope: "Toàn hệ thống", nav: adminNav },
   QUAN_LY: { user: "Lê Quốc Bảo", initials: "QB", title: "Quản lý tòa nhà", scope: "The Fern House", nav: [
-    { label: "Tổng quan", icon: "grid" }, { label: "Phòng & Tin đăng", icon: "door" }, { label: "Hợp đồng", icon: "contract" },
-    { label: "Chốt chỉ số", icon: "wallet" }, { label: "Hóa đơn", icon: "split" }, { label: "Bảo trì", icon: "tools", badge: "3" }, { label: "Tài sản", icon: "grid" }, { label: "Khách thuê & Ở ghép", icon: "users" },
+    { label: "Tổng quan", path: "overview", icon: "grid" }, { label: "Phòng & Tin đăng", path: "rooms", icon: "door" }, { label: "Hợp đồng", path: "contracts", icon: "contract" },
+    { label: "Chốt chỉ số", path: "meter-readings", icon: "wallet" }, { label: "Hóa đơn", path: "invoices", icon: "split" }, { label: "Bảo trì", path: "maintenance", icon: "tools", badge: "3" }, { label: "Tài sản", path: "assets", icon: "grid" }, { label: "Khách thuê & Ở ghép", path: "tenants", icon: "users" },
   ] },
   KY_THUAT: { user: "Trần Minh", initials: "TM", title: "Kỹ thuật viên", scope: "Mộc · Fern House", nav: [
-    { label: "Việc của tôi", icon: "tools", badge: "3" }, { label: "Bảng bảo trì", icon: "grid" }, { label: "Tài sản", icon: "building" },
+    { label: "Việc của tôi", path: "my-tasks", icon: "tools", badge: "3" }, { label: "Bảng bảo trì", path: "maintenance-board", icon: "grid" }, { label: "Tài sản", path: "assets", icon: "building" },
   ] },
   SALE: { user: "Đinh Khánh Linh", initials: "KL", title: "Nhân viên kinh doanh", scope: "The Fern House", nav: [
-    { label: "Khách tiềm năng", icon: "users" }, { label: "Phòng & Tin đăng", icon: "door" }, { label: "Hợp đồng", icon: "contract" },
+    { label: "Khách tiềm năng", path: "leads", icon: "users" }, { label: "Phòng & Tin đăng", path: "rooms", icon: "door" }, { label: "Hợp đồng", path: "contracts", icon: "contract" },
   ] },
 };
 
+/** Chặn trang quản trị: chưa login → /login kèm next, CUSTOMER → đá ra. */
+export function RequireStaff({ children }: { children: ReactNode }) {
+  const { user, initializing } = useAuth();
+  const loc = useLocation();
+  if (initializing) return null;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
+  if (user.role === "CUSTOMER") return <Navigate to="/my-room" replace />;
+  return <>{children}</>;
+}
+
 export default function AdminLayout() {
-  const { user, logout } = useAuth();
+  const { user, initializing, logout } = useAuth();
   const { section } = useParams();
+  const loc = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  if (!user) return <Navigate to="/dang-nhap" replace />;
-  if (user.role === "CUSTOMER") return <Navigate to="/phong-cua-toi" replace />;
+  if (initializing) return null;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
+  if (user.role === "CUSTOMER") return <Navigate to="/my-room" replace />;
   const role = user.role;
   const current = { ...roles[role], user: user.fullName, initials: user.fullName.split(" ").slice(-2).map((w) => w[0]).join(""), scope: user.buildings?.join(" · ") ?? roles[role].scope };
   const navItems = current.nav;
-  const item = section ? navItems.find((n) => slug(n.label) === section) : navItems[0];
-  if (!item) return <Navigate to="/quan-tri" replace />;
+  const item = section ? navItems.find((n) => n.path === section) : navItems[0];
+  if (!item) return <Navigate to="/admin" replace />;
   const activeNav = item.label;
-  const setActiveNav = (label: string) => navigate(`/quan-tri/${slug(label)}`);
+  const setActiveNav = (label: string) => {
+    const target = navItems.find((n) => n.label === label) ?? navItems[0];
+    navigate(`/admin/${target.path}`);
+  };
 
   const screens: Record<string, ReactNode> = {
     "Tổng quan": role === "QUAN_LY" ? <ManagerHome onNavigate={setActiveNav} /> : <Dashboard onNavigate={setActiveNav} />,
@@ -108,7 +119,7 @@ export default function AdminLayout() {
         <div className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{current.scope}</div>
         <div className="space-y-1">
           {navItems.map((item) => (
-            <NavLink key={item.label} to={`/quan-tri/${slug(item.label)}`} className={`nav-item ${activeNav === item.label ? "nav-active" : ""}`} onClick={() => setMobileOpen(false)}>
+            <NavLink key={item.path} to={`/admin/${item.path}`} className={`nav-item ${activeNav === item.label ? "nav-active" : ""}`} onClick={() => setMobileOpen(false)}>
               <Icon name={item.icon} size={19} />
               <span>{item.label}</span>
               {item.badge && <span className="ml-auto rounded-full bg-coral px-2 py-0.5 text-[10px] font-bold text-white">{item.badge}</span>}
@@ -126,7 +137,7 @@ export default function AdminLayout() {
           <Icon name="more" size={17} />
         </div>
         <div className="h-px bg-white/10"></div>
-        <button className="mt-3 flex w-full items-center justify-between text-xs font-semibold text-slate-300" onClick={() => { logout(); navigate("/"); }}>
+        <button className="mt-3 flex w-full items-center justify-between text-xs font-semibold text-slate-300" onClick={() => { void logout().finally(() => navigate("/")); }}>
           Đăng xuất <Icon name="arrow" size={14} />
         </button>
       </div>

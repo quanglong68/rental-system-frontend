@@ -1,4 +1,4 @@
-import { createBrowserRouter, Link } from "react-router";
+import { createBrowserRouter, Link, Navigate } from "react-router";
 import CustomerLayout, { RequireCustomer } from "./layouts/CustomerLayout";
 import Explore from "./screens/customer/Explore";
 import MyHome from "./screens/customer/MyHome";
@@ -7,7 +7,7 @@ import Roommates from "./screens/customer/Roommates";
 import Profile from "./screens/customer/Profile";
 import Requests from "./screens/customer/Requests";
 import { Login, Register } from "./screens/auth/AuthPages";
-import AdminLayout from "./layouts/AdminLayout";
+import AdminLayout, { RequireStaff } from "./layouts/AdminLayout";
 
 function NotFound() {
   return (
@@ -23,16 +23,26 @@ export const router = createBrowserRouter([
     Component: CustomerLayout,
     children: [
       { index: true, Component: Explore },
-      { path: "dang-nhap", Component: Login },
-      { path: "dang-ky", Component: Register },
-      { path: "phong-cua-toi", element: <RequireCustomer><MyHome /></RequireCustomer> },
-      { path: "sua-chua", element: <RequireCustomer><Repairs /></RequireCustomer> },
-      { path: "o-ghep", element: <RequireCustomer><Roommates /></RequireCustomer> },
-      { path: "ho-so", element: <RequireCustomer><Profile /></RequireCustomer> },
-      { path: "lich-hen", element: <RequireCustomer><Requests /></RequireCustomer> },
+      { path: "login", Component: Login },
+      { path: "register", Component: Register },
+      { path: "my-room", element: <RequireCustomer><MyHome /></RequireCustomer> },
+      { path: "repairs", element: <RequireCustomer><Repairs /></RequireCustomer> },
+      { path: "roommates", element: <RequireCustomer><Roommates /></RequireCustomer> },
+      { path: "profile", element: <RequireCustomer><Profile /></RequireCustomer> },
+      { path: "requests", element: <RequireCustomer><Requests /></RequireCustomer> },
+      // Redirect URL tiếng Việt cũ → mới (giữ bookmark/deeplink không gãy).
+      { path: "dang-nhap", element: <Navigate to="/login" replace /> },
+      { path: "dang-ky", element: <Navigate to="/register" replace /> },
+      { path: "phong-cua-toi", element: <Navigate to="/my-room" replace /> },
+      { path: "sua-chua", element: <Navigate to="/repairs" replace /> },
+      { path: "o-ghep", element: <Navigate to="/roommates" replace /> },
+      { path: "ho-so", element: <Navigate to="/profile" replace /> },
+      { path: "lich-hen", element: <Navigate to="/requests" replace /> },
       { path: "*", Component: NotFound },
     ],
   },
-  { path: "/quan-tri", Component: AdminLayout },
-  { path: "/quan-tri/:section", Component: AdminLayout },
+  { path: "/admin", element: <RequireStaff><AdminLayout /></RequireStaff> },
+  { path: "/admin/:section", element: <RequireStaff><AdminLayout /></RequireStaff> },
+  { path: "/quan-tri", element: <Navigate to="/admin" replace /> },
+  { path: "/quan-tri/:section", element: <Navigate to="/admin" replace /> },
 ]);

@@ -1,39 +1,69 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
-import { DEMO_PASSWORD, demoAccounts } from "../mocks/demoAccounts";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { fetchMe, login as apiLogin, logout as apiLogout, register as apiRegister, toUser } from "../api/auth";
+import { clearSession, getRefreshToken } from "../api/token";
+import type { Role, User } from "../api/types";
 
-export type Role = "ADMIN" | "QUAN_LY" | "KY_THUAT" | "SALE" | "CUSTOMER";
-export type User = { sub: string; fullName: string; role: Role; buildings?: string[] };
+export type { Role, User };
 
 type Ctx = {
   user: User | null;
+  /** true trong lúc bootstrap /me lần đầu (guard nên chờ). */
+  initializing: boolean;
   login: (username: string, password: string) => Promise<User>;
   register: (data: { fullName: string; username: string; password: string }) => Promise<User>;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<Ctx | null>(null);
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
-  const login: Ctx["login"] = async (username, password) => {
-    await wait(500);
-    const acc = demoAccounts.find((a) => a.sub === username.trim().toLowerCase());
-    if (!acc || password !== DEMO_PASSWORD) throw new Error("Tên đăng nhập hoặc mật khẩu không đúng.");
-    setUser(acc);
-    return acc;
-  };
+  // Bootstrap: còn refreshToken thì thử /me để khôi phục phiên (có auto-refresh trong client).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!getRefreshToken()) return;
+        const me = await fetchMe();
+        if (!cancelled) setUser(toUser(me.username, me.accountType, me.roles));
+      } catch {
+        if (!cancelled) {
+          clearSession();
+          setUser(null);
+        }
+      } finally {
+        if (!cancelled) setInitializing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const register: Ctx["register"] = async ({ fullName, username }) => {
-    await wait(600);
-    const u: User = { sub: username, fullName, role: "CUSTOMER" };
+  const login: Ctx["login"] = useCallback(async (username, password) => {
+    const res = await apiLogin(username, password);
+    const u = toUser(res.account.username, res.account.accountType, res.account.roles);
     setUser(u);
     return u;
-  };
+  }, []);
 
-  return <AuthContext.Provider value={{ user, login, register, logout: () => setUser(null) }}>{children}</AuthContext.Provider>;
+  const register: Ctx["register"] = useCallback(async ({ fullName, username, password }) => {
+    await apiRegister({ fullName, username, password });
+    // Register BE chỉ trả 201 không kèm token → login ngay để lấy cặp token thật.
+    const res = await apiLogin(username, password);
+    const u = toUser(res.account.username, res.account.accountType, res.account.roles, fullName);
+    setUser(u);
+    return u;
+  }, []);
+
+  const logout: Ctx["logout"] = useCallback(async () => {
+    await apiLogout();
+    setUser(null);
+  }, []);
+
+  return <AuthContext.Provider value={{ user, initializing, login, register, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
@@ -42,4 +72,4 @@ export function useAuth() {
   return ctx;
 }
 
-export const homeFor = (role: Role) => (role === "CUSTOMER" ? "/phong-cua-toi" : "/quan-tri");
+export const homeFor = (role: Role) => (role === "CUSTOMER" ? "/my-room" : "/admin");

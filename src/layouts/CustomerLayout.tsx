@@ -9,17 +9,18 @@ import "../screens/customer/customer.css";
 const publicTabs = [{ to: "/", label: "Khám phá", icon: "search" as const }];
 const memberTabs = [
   ...publicTabs,
-  { to: "/phong-cua-toi", label: "Phòng của tôi", icon: "home" as const },
-  { to: "/lich-hen", label: "Lịch hẹn", icon: "calendar" as const },
-  { to: "/sua-chua", label: "Sửa chữa", icon: "tools" as const },
-  { to: "/o-ghep", label: "Ở ghép", icon: "users" as const },
+  { to: "/my-room", label: "Phòng của tôi", icon: "home" as const },
+  { to: "/requests", label: "Lịch hẹn", icon: "calendar" as const },
+  { to: "/repairs", label: "Sửa chữa", icon: "tools" as const },
+  { to: "/roommates", label: "Ở ghép", icon: "users" as const },
 ];
 
 /** Chặn trang chỉ dành cho CUSTOMER đã đăng nhập */
 export function RequireCustomer({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, initializing } = useAuth();
   const loc = useLocation();
-  if (!user) return <Navigate to={`/dang-nhap?next=${encodeURIComponent(loc.pathname)}`} replace />;
+  if (initializing) return null;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
   if (user.role !== "CUSTOMER") return <Navigate to={homeFor(user.role)} replace />;
   return <>{children}</>;
 }
@@ -35,7 +36,7 @@ export default function CustomerLayout() {
   const isCustomer = user?.role === "CUSTOMER";
   const tabs = isCustomer ? memberTabs : publicTabs;
   const initials = user ? user.fullName.split(" ").slice(-2).map((w) => w[0]).join("") : "";
-  const authPage = loc.pathname.startsWith("/dang-");
+  const authPage = loc.pathname === "/login" || loc.pathname === "/register";
 
   return (
     <div className="cx">
@@ -69,7 +70,7 @@ export default function CustomerLayout() {
                         <span className="flex-1"><b className="block text-[13px]">{n.title}</b><small className="cx-meta">{n.kind} · {toVNTime(n.at, true)}</small></span>
                       </div>
                     ))}
-                    <Link to="/ho-so#thong-bao" className="cx-btn ghost !mt-2 !h-10 w-full" onClick={() => setBell(false)}>Xem tất cả thông báo</Link>
+                    <Link to="/profile#notifications" className="cx-btn ghost !mt-2 !h-10 w-full" onClick={() => setBell(false)}>Xem tất cả thông báo</Link>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -77,17 +78,17 @@ export default function CustomerLayout() {
                 {menu && (
                   <motion.div className="cx-menu" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.97 }}>
                     <div className="px-3 py-2"><b className="block text-sm">{user.fullName}</b><span className="cx-meta">{user.sub} · {user.role}</span></div>
-                    {isCustomer && <Link to="/ho-so" onClick={() => setMenu(false)}>Hồ sơ</Link>}
+                    {isCustomer && <Link to="/profile" onClick={() => setMenu(false)}>Hồ sơ</Link>}
                     {!isCustomer && <button onClick={() => { setMenu(false); navigate(homeFor(user.role)); }}>Vào trang quản trị</button>}
-                    <button onClick={() => { setMenu(false); logout(); navigate("/"); }}>Đăng xuất</button>
+                    <button onClick={() => { setMenu(false); void logout().finally(() => navigate("/")); }}>Đăng xuất</button>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <Link to="/dang-nhap" className="cx-link">Đăng nhập</Link>
-              <Link to="/dang-ky" className="cx-btn !h-10 !rounded-xl !px-4">Đăng ký</Link>
+              <Link to="/login" className="cx-link">Đăng nhập</Link>
+              <Link to="/register" className="cx-btn !h-10 !rounded-xl !px-4">Đăng ký</Link>
             </div>
           )}
         </motion.header>
