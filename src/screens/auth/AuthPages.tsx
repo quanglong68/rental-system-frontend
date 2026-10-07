@@ -2,13 +2,46 @@ import { useState, type FormEvent } from "react";
 import { motion } from "motion/react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { Icon } from "../../components/ui";
-import { DEMO_PASSWORD, demoAccounts } from "../../mocks/demoAccounts";
+import { ApiError } from "../../api/client";
 import { homeFor, useAuth } from "../../lib/auth";
 import "./auth.css";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
 const isPhone = (v: string) => /^(0|\+84)(3|5|7|8|9)\d{8}$/.test(v.replace(/\s/g, ""));
+
+/** Map ErrorCode backend (Table 7/8) thành message tiếng Việt, không hiện Error thô. */
+function toVnMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    switch (err.code) {
+      case "INVALID_CREDENTIALS":
+      case "UNAUTHENTICATED":
+        return "Tên đăng nhập hoặc mật khẩu không đúng.";
+      case "ACCOUNT_LOCKED":
+        return "Tài khoản bị khóa tạm thời do nhập sai nhiều lần. Vui lòng thử lại sau 15 phút.";
+      case "ACCOUNT_DISABLED":
+      case "FORBIDDEN":
+        return "Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.";
+      case "USERNAME_EXISTS":
+        return "Tên đăng nhập đã tồn tại. Vui lòng đăng nhập hoặc dùng tên khác.";
+      case "TOKEN_EXPIRED":
+      case "REFRESH_TOKEN_INVALID":
+        return "Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.";
+      case "VALIDATION_ERROR":
+        return err.details?.[0]?.message || err.message || "Thông tin nhập chưa hợp lệ.";
+      case "DEPENDENCY_UNAVAILABLE":
+        return "Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.";
+      default:
+        return err.message || "Có lỗi xảy ra. Vui lòng thử lại.";
+    }
+  }
+  return (err as Error)?.message || "Có lỗi xảy ra. Vui lòng thử lại.";
+}
+
+/** Chỉ giữ next nội bộ để tránh open-redirect. */
+function safeNext(v: string | null): string | null {
+  return v && v.startsWith("/") && !v.startsWith("//") ? v : null;
+}
 
 function Shell({ title, sub, children }: { title: React.ReactNode; sub: string; children: React.ReactNode }) {
   return (
@@ -46,13 +79,14 @@ function Field({ label, error, ...p }: { label: string; error?: string } & React
 }
 
 export function Login() {
-  const { user, login } = useAuth();
+  const { user, initializing, login } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  if (initializing) return null;
   if (user) return <Navigate to={homeFor(user.role)} replace />;
 
   const submit = async (e: FormEvent) => {
@@ -62,10 +96,10 @@ export function Login() {
     setLoading(true);
     try {
       const u = await login(username, password);
-      const next = params.get("next");
-      navigate(next && u.role === "CUSTOMER" ? next : homeFor(u.role), { replace: true });
+      const next = safeNext(params.get("next"));
+      navigate(next ?? homeFor(u.role), { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      setError(toVnMessage(err));
     } finally {
       setLoading(false);
     }
@@ -79,26 +113,19 @@ export function Login() {
         {error && <motion.div className="au-error" initial={{ x: -8 }} animate={{ x: [0, -6, 6, -3, 0] }}>{error}</motion.div>}
         <button className="cx-btn w-full" disabled={loading}>{loading ? <span className="au-spin" /> : "Đăng nhập"}</button>
       </form>
-      <p className="au-alt">Chưa có tài khoản? <Link to="/dang-ky">Đăng ký người thuê</Link></p>
-      {(
-        <div className="au-demo">
-          <div className="cx-meta">Tài khoản mẫu để xem giao diện · mật khẩu <b>{DEMO_PASSWORD}</b></div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {demoAccounts.map((a) => <button key={a.sub} type="button" className="cx-chip !py-1.5 !text-xs" onClick={() => { setUsername(a.sub); setPassword(DEMO_PASSWORD); }}>{a.role}</button>)}
-          </div>
-        </div>
-      )}
+      <p className="au-alt">Chưa có tài khoản? <Link to="/register">Đăng ký người thuê</Link></p>
     </Shell>
   );
 }
 
 export function Register() {
-  const { user, register } = useAuth();
+  const { user, initializing, register } = useAuth();
   const navigate = useNavigate();
   const [f, setF] = useState({ fullName: "", username: "", password: "", confirm: "" });
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  if (initializing) return null;
   if (user) return <Navigate to={homeFor(user.role)} replace />;
 
   const errs = {
@@ -117,10 +144,10 @@ export function Register() {
     if (Object.values(errs).some(Boolean)) return;
     setLoading(true);
     try {
-      await register({ fullName: f.fullName.trim(), username: f.username.trim().replace(/\s/g, ""), password: f.password });
-      navigate("/", { replace: true });
+      const u = await register({ fullName: f.fullName.trim(), username: f.username.trim().replace(/\s/g, ""), password: f.password });
+      navigate(homeFor(u.role), { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      setError(toVnMessage(err));
     } finally {
       setLoading(false);
     }
@@ -137,7 +164,7 @@ export function Register() {
         {error && <div className="au-error">{error}</div>}
         <button className="cx-btn w-full" disabled={loading}>{loading ? <span className="au-spin" /> : "Tạo tài khoản"}</button>
       </form>
-      <p className="au-alt">Đã có tài khoản? <Link to="/dang-nhap">Đăng nhập</Link></p>
+      <p className="au-alt">Đã có tài khoản? <Link to="/login">Đăng nhập</Link></p>
     </Shell>
   );
 }

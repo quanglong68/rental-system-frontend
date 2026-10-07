@@ -21,7 +21,7 @@ export default function Profile() {
   const shown = notis.filter((n) => filter === "Tất cả" || n.kind === filter);
   const unread = notis.filter((n) => !n.read).length;
 
-  useEffect(() => { if (loc.hash === "#thong-bao") document.getElementById("thong-bao")?.scrollIntoView({ behavior: "smooth" }); }, [loc.hash]);
+  useEffect(() => { if (loc.hash === "#notifications") document.getElementById("notifications")?.scrollIntoView({ behavior: "smooth" }); }, [loc.hash]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
   const save = () => {
@@ -84,7 +84,7 @@ export default function Profile() {
           </motion.article>
         </div>
 
-        <motion.article id="thong-bao" className="cx-panel scroll-mt-28" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.15, ease }}>
+        <motion.article id="notifications" className="cx-panel scroll-mt-28" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.15, ease }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="cx-panel-title !m-0">Thông báo · {unread} chưa đọc</h3>
             <button className="cx-link !p-0 text-sm underline disabled:opacity-40" disabled={!unread} onClick={() => notiStore.markAll()}>Đánh dấu đã đọc tất cả</button>
