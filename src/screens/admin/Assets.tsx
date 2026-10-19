@@ -1,126 +1,20 @@
-import { useState } from "react";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "../../components/ui";
+import { useEffect, useState } from "react";
+import { Icon, MiniStat, PageHead, Pill, Tabs, toVNTime, type Tone } from "../../components/ui";
+import { assetApi, type Appliance, type MaintenanceSchedule } from "../../api/assetMaintenance";
 
-const NOW = Date.parse("2026-10-04T00:00:00Z");
-const DAY = 86400000;
-const assets = [
-  { code: "ML-A402", name: "Máy lạnh Daikin 1HP", room: "A.402 · Fern House", cat: "Điện lạnh", cost: 8900000, bought: "2024-05-10T00:00:00Z", warranty: "2027-05-10T00:00:00Z", state: "Tốt" },
-  { code: "NL-A402", name: "Máy nước nóng Ariston 20L", room: "A.402 · Fern House", cat: "Nước", cost: 3200000, bought: "2023-11-02T00:00:00Z", warranty: "2026-11-02T00:00:00Z", state: "Tốt" },
-  { code: "ML-C201", name: "Máy lạnh Panasonic 1.5HP", room: "C.201 · Mộc", cat: "Điện lạnh", cost: 11500000, bought: "2022-03-20T00:00:00Z", warranty: "2025-03-20T00:00:00Z", state: "Đang sửa" },
-  { code: "TL-B305", name: "Tủ lạnh Aqua 130L", room: "B.305 · Fern House", cat: "Gia dụng", cost: 4100000, bought: "2025-01-15T00:00:00Z", warranty: "2027-01-15T00:00:00Z", state: "Tốt" },
-  { code: "TM-T1", name: "Thang máy Mitsubishi", room: "Khu chung · Fern House", cat: "Kết cấu", cost: 420000000, bought: "2021-08-01T00:00:00Z", warranty: "2026-10-20T00:00:00Z", state: "Tốt" },
-  { code: "BOM-01", name: "Máy bơm tăng áp", room: "Tầng mái · An Nhiên", cat: "Nước", cost: 6700000, bought: "2020-06-12T00:00:00Z", warranty: "2022-06-12T00:00:00Z", state: "Cần thay" },
-];
-const stateTone: Record<string, Tone> = { "Tốt": "teal", "Đang sửa": "sky", "Cần thay": "coral" };
-const plans = [
-  { task: "Vệ sinh máy lạnh toàn tòa", scope: "Fern House · 50 máy", every: "3 tháng", next: "2026-10-12T01:00:00Z", who: "Trần Minh", last: "2026-07-10T01:00:00Z" },
-  { task: "Kiểm định thang máy", scope: "Fern House · TM-T1", every: "6 tháng", next: "2026-10-20T02:00:00Z", who: "Đối tác Mitsubishi", last: "2026-04-18T02:00:00Z" },
-  { task: "Súc rửa bồn nước mái", scope: "An Nhiên · 2 bồn", every: "6 tháng", next: "2026-11-05T00:30:00Z", who: "Nguyễn Văn Tài", last: "2026-05-05T00:30:00Z" },
-  { task: "Kiểm tra PCCC & bình chữa cháy", scope: "Tất cả tòa", every: "12 tháng", next: "2026-10-06T02:00:00Z", who: "Nguyễn Văn Tài", last: "2025-10-06T02:00:00Z" },
-];
-const initialReports = [
-  { id: "BC-88", title: "Vòi sen bị rỉ, nước chảy yếu", room: "A.402 · Fern House", by: "Hoàng Thị Mai", at: "2026-10-04T00:40:00Z", photos: 3, asset: "NL-A402" },
-  { id: "BC-87", title: "Ổ cắm gần bàn bị cháy xém", room: "B.305 · Fern House", by: "Nguyễn Lam", at: "2026-10-03T14:10:00Z", photos: 2, asset: "" },
-  { id: "BC-86", title: "Cửa sổ không đóng kín", room: "C.201 · Mộc", by: "Trịnh Gia Huy", at: "2026-10-03T03:25:00Z", photos: 1, asset: "" },
-];
-const photos = ["photo-1584622650111-993a426fbf0a", "photo-1585128792020-803d29415281", "photo-1621905251189-08b45d6a269e"];
-
+const stateLabel: Record<string, string> = { GOOD: "Tốt", NEEDS_REPAIR: "Cần sửa", BROKEN: "Hỏng" };
+const stateTone: Record<string, Tone> = { GOOD: "teal", NEEDS_REPAIR: "amber", BROKEN: "coral" };
 export default function Assets() {
-  const [tab, setTab] = useState("Báo hỏng");
-  const [reports, setReports] = useState(initialReports);
-  const [convert, setConvert] = useState<(typeof initialReports)[number] | null>(null);
-  const [prio, setPrio] = useState("Cao");
-  const [adding, setAdding] = useState(false);
-  const [toast, show] = useToast();
-  const left = (iso: string) => Math.round((Date.parse(iso) - NOW) / DAY);
-  return (
-    <>
-      <PageHead eyebrow="Vận hành" title="Tài sản & Bảo trì định kỳ" desc="Danh mục thiết bị theo phòng, hạn bảo hành, lịch bảo trì định kỳ và tiếp nhận báo hỏng từ khách thuê."
-        actions={<><Tabs items={["Báo hỏng", "Thiết bị", "Định kỳ"]} value={tab} onChange={setTab} /><button className="primary-button" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Thêm thiết bị</button></>} />
-      <section className="stats-grid mb-6">
-        <MiniStat label="Thiết bị đang quản lý" value="412" note="Giá trị 2,1 tỷ" />
-        <MiniStat label="Hết bảo hành 30 ngày" value="2" note="NL-A402, TM-T1" tone="amber" />
-        <MiniStat label="Báo hỏng chờ xử lý" value={String(reports.length)} note="Chuyển thành phiếu sửa chữa" tone="coral" />
-        <MiniStat label="Bảo trì tuần tới" value="2" note="PCCC, vệ sinh máy lạnh" tone="sky" />
-      </section>
-
-      {tab === "Báo hỏng" && (
-        <article className="panel">
-          <div className="panel-header"><div><h2>Báo hỏng từ khách thuê</h2><p>Xem ảnh, gắn thiết bị, đặt độ ưu tiên và giao cho kỹ thuật</p></div></div>
-          {reports.length === 0 && <div className="p-10 text-center text-sm text-muted">Đã xử lý hết báo hỏng. 🎉</div>}
-          {reports.map((r) => (
-            <div key={r.id} className="approval">
-              <div className="flex -space-x-3">{photos.slice(0, r.photos).map((p) => <img key={p} src={`https://images.unsplash.com/${p}?w=120&h=120&fit=crop`} alt="" className="h-11 w-11 rounded-xl border-2 border-white object-cover" />)}</div>
-              <div className="min-w-[220px] flex-1"><b className="text-sm">{r.title}</b><div className="text-xs text-muted">{r.id} · {r.room} · {r.by} · {toVNTime(r.at, true)} · {r.photos}/5 ảnh</div></div>
-              <button className="primary-button !h-9" onClick={() => setConvert(r)}>Tạo phiếu sửa chữa <Icon name="arrow" size={14} /></button>
-            </div>
-          ))}
-        </article>
-      )}
-
-      {tab === "Thiết bị" && (
-        <article className="panel">
-          <Toolbar placeholder="Tìm mã, tên thiết bị, phòng..."><select className="select"><option>Mọi nhóm</option><option>Điện lạnh</option><option>Nước</option><option>Gia dụng</option><option>Kết cấu</option></select></Toolbar>
-          <div className="overflow-x-auto">
-            <table className="data-table">
-              <thead><tr><th>Thiết bị</th><th>Vị trí</th><th>Nhóm</th><th className="text-right">Nguyên giá</th><th>Bảo hành</th><th>Tình trạng</th></tr></thead>
-              <tbody>{assets.map((a) => { const d = left(a.warranty); return (
-                <tr key={a.code}>
-                  <td><b>{a.name}</b><div className="sub font-mono">{a.code} · mua {toVNTime(a.bought)}</div></td>
-                  <td className="text-[13px]">{a.room}</td><td className="text-[13px]">{a.cat}</td>
-                  <td className="text-right font-bold">{vnd(a.cost)}</td>
-                  <td className="whitespace-nowrap text-xs"><div>{toVNTime(a.warranty)}</div>{d < 0 ? <span className="font-bold text-muted">Hết hạn</span> : d <= 30 ? <span className="font-bold text-[#a6640b]">Còn {d} ngày</span> : <span className="text-teal">Còn hạn</span>}</td>
-                  <td><Pill tone={stateTone[a.state]}>{a.state}</Pill></td>
-                </tr>); })}</tbody>
-            </table>
-          </div>
-        </article>
-      )}
-
-      {tab === "Định kỳ" && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {plans.map((p) => { const d = left(p.next); return (
-            <article key={p.task} className="panel p-5">
-              <div className="flex items-start justify-between gap-3"><div><Pill tone={d <= 7 ? "amber" : "slate"}>Mỗi {p.every}</Pill><h3 className="mt-3 text-base font-extrabold">{p.task}</h3><div className="text-xs text-muted">{p.scope}</div></div>
-                <div className="text-right"><div className="text-3xl font-extrabold tracking-tight">{d}</div><div className="text-[10px] font-bold uppercase text-muted">ngày nữa</div></div></div>
-              <div className="mt-4 h-1.5 rounded-full bg-[#e6eeea]"><div className="h-full rounded-full bg-teal" style={{ width: `${Math.max(6, 100 - (d / ((Date.parse(p.next) - Date.parse(p.last)) / DAY)) * 100)}%` }} /></div>
-              <div className="mt-3 flex items-center justify-between text-xs text-muted"><span>Lần trước {toVNTime(p.last)}</span><span>Kế tiếp <b className="text-ink">{toVNTime(p.next, true)}</b></span></div>
-              <div className="mt-4 flex items-center justify-between border-t border-line pt-3"><span className="text-xs">Phụ trách: <b>{p.who}</b></span><button className="text-button" onClick={() => show(`Đã tạo phiếu cho “${p.task}”`)}>Tạo phiếu ngay <Icon name="chevron" size={12} /></button></div>
-            </article>); })}
-        </div>
-      )}
-
-      <Drawer open={!!convert} eyebrow={convert ? `${convert.id} · ${convert.room}` : ""} title="Chuyển thành phiếu sửa chữa" onClose={() => setConvert(null)}
-        footer={<><button className="secondary-button" onClick={() => setConvert(null)}>Hủy</button><button className="primary-button" onClick={() => { setReports(reports.filter((r) => r.id !== convert!.id)); setConvert(null); show("Đã tạo phiếu BT-220 và giao cho kỹ thuật"); }}>Tạo & giao việc</button></>}>
-        {convert && (
-          <>
-            <div className="mb-4 grid grid-cols-3 gap-2">{photos.slice(0, convert.photos).map((p) => <img key={p} src={`https://images.unsplash.com/${p}?w=300&h=300&fit=crop`} alt="" className="aspect-square w-full rounded-xl object-cover" />)}</div>
-            <div className="form-grid">
-              <div className="span-2"><Field label="Tiêu đề phiếu"><input defaultValue={convert.title} /></Field></div>
-              <div className="span-2"><Field label="Độ ưu tiên"><div className="tabs !w-fit">{["Khẩn cấp", "Cao", "Trung bình", "Thấp"].map((p) => <button key={p} type="button" className={prio === p ? "tab-on" : ""} onClick={() => setPrio(p)}>{p}</button>)}</div></Field></div>
-              <Field label="Giao cho KY_THUAT"><select><option>Trần Minh · 3 việc đang mở</option><option>Nguyễn Văn Tài · 1 việc đang mở</option></select></Field>
-              <Field label="Hạn hoàn thành"><input type="datetime-local" defaultValue="2026-10-05T10:00" /></Field>
-              <div className="span-2"><Field label="Thiết bị liên quan" hint="Để trống nếu không gắn với thiết bị"><select defaultValue={convert.asset}><option value="">—</option>{assets.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}</select></Field></div>
-              <div className="span-2"><Field label="Ghi chú cho kỹ thuật"><textarea defaultValue="Khách có mặt sau 18:00, liên hệ trước khi tới." /></Field></div>
-            </div>
-          </>
-        )}
-      </Drawer>
-
-      <Drawer open={adding} eyebrow="Danh mục" title="Thêm thiết bị" onClose={() => setAdding(false)}
-        footer={<><button className="secondary-button" onClick={() => setAdding(false)}>Hủy</button><button className="primary-button" onClick={() => { setAdding(false); show("Đã thêm thiết bị"); }}>Lưu</button></>}>
-        <div className="form-grid">
-          <div className="span-2"><Field label="Tên thiết bị"><input placeholder="Máy lạnh LG 1HP" /></Field></div>
-          <Field label="Mã"><input placeholder="ML-B306" /></Field>
-          <Field label="Nhóm"><select><option>Điện lạnh</option><option>Nước</option><option>Gia dụng</option><option>Kết cấu</option></select></Field>
-          <Field label="Vị trí"><select><option>B.306 · Fern House</option><option>Khu chung · Fern House</option></select></Field>
-          <Field label="Nguyên giá (₫)"><input placeholder="9.500.000" /></Field>
-          <Field label="Ngày mua"><input type="date" defaultValue="2026-10-04" /></Field>
-          <Field label="Hết bảo hành"><input type="date" defaultValue="2028-10-04" /></Field>
-          <div className="span-2"><Field label="Bảo trì định kỳ"><select><option>Không</option><option>Mỗi 3 tháng</option><option>Mỗi 6 tháng</option><option>Mỗi 12 tháng</option></select></Field></div>
-        </div>
-      </Drawer>
-      {toast}
-    </>
-  );
+  const [tab, setTab] = useState("Thiết bị"); const [buildingId, setBuildingId] = useState(""); const [roomId, setRoomId] = useState(""); const [items, setItems] = useState<Appliance[]>([]); const [schedules, setSchedules] = useState<MaintenanceSchedule[]>([]); const [name, setName] = useState(""); const [scheduleTitle, setScheduleTitle] = useState(""); const [scheduleStaff, setScheduleStaff] = useState(""); const [scheduleMonths, setScheduleMonths] = useState("6"); const [scheduleDate, setScheduleDate] = useState(""); const [error, setError] = useState("");
+  const load = async () => { try { setError(""); const [a, s] = await Promise.all([assetApi.appliances(buildingId ? `?buildingId=${buildingId}` : ""), assetApi.schedules(buildingId ? Number(buildingId) : undefined)]); setItems(a); setSchedules(s); } catch (e) { setError(e instanceof Error ? e.message : "Không tải được dữ liệu tài sản."); } };
+  useEffect(() => { void load(); }, [buildingId]);
+  const addAppliance = async (e: React.FormEvent) => { e.preventDefault(); try { await assetApi.createAppliance({ roomId: Number(roomId), name }); setName(""); await load(); } catch (ex) { setError(ex instanceof Error ? ex.message : "Không thêm được thiết bị."); } };
+  const addSchedule = async (e: React.FormEvent) => { e.preventDefault(); try { await assetApi.createSchedule({ buildingId: Number(buildingId), staffId: Number(scheduleStaff), title: scheduleTitle, intervalMonths: Number(scheduleMonths), firstDate: scheduleDate }); setScheduleTitle(""); await load(); } catch (ex) { setError(ex instanceof Error ? ex.message : "Không tạo được lịch."); } };
+  const setStatus = async (a: Appliance, status: string) => { try { await assetApi.updateAppliance(a.id, { name: a.name, status }); await load(); } catch (ex) { setError(ex instanceof Error ? ex.message : "Không cập nhật được thiết bị."); } };
+  const warranty = async (a: Appliance) => { const provider = window.prompt("Nhà cung cấp bảo hành:", a.warrantyProvider ?? ""); if (!provider) return; const startDate = window.prompt("Ngày bắt đầu (YYYY-MM-DD):", a.warrantyStartDate ?? ""); const endDate = window.prompt("Ngày hết hạn (YYYY-MM-DD):", a.warrantyEndDate ?? ""); if (!startDate || !endDate) return; try { await assetApi.updateWarranty(a.id, { provider, startDate, endDate }); await load(); } catch (ex) { setError(ex instanceof Error ? ex.message : "Không lưu được bảo hành."); } };
+  return <><PageHead eyebrow="Vận hành" title="Tài sản & Bảo trì định kỳ" desc="Danh mục thiết bị và lịch bảo trì được tải từ asset-maintenance-service." actions={<Tabs items={["Thiết bị", "Định kỳ"]} value={tab} onChange={setTab} />} />
+    <div className="mb-5 flex flex-wrap items-end gap-3"><label className="text-xs font-bold">Mã tòa nhà<input className="input mt-1 block" type="number" value={buildingId} onChange={e => setBuildingId(e.target.value)} placeholder="buildingId" /></label>{tab === "Thiết bị" && <form onSubmit={e => void addAppliance(e)} className="flex flex-wrap items-end gap-2"><label className="text-xs font-bold">Mã phòng<input className="input mt-1 block" type="number" required value={roomId} onChange={e => setRoomId(e.target.value)} /></label><label className="text-xs font-bold">Tên thiết bị<input className="input mt-1 block" required value={name} onChange={e => setName(e.target.value)} placeholder="Máy lạnh" /></label><button className="primary-button"><Icon name="plus" size={15} /> Thêm thiết bị</button></form>}{tab === "Định kỳ" && <form onSubmit={e => void addSchedule(e)} className="flex flex-wrap items-end gap-2"><label className="text-xs font-bold">Tên lịch<input className="input mt-1 block" required value={scheduleTitle} onChange={e => setScheduleTitle(e.target.value)} /></label><label className="text-xs font-bold">Mã KTV<input className="input mt-1 block" required type="number" value={scheduleStaff} onChange={e => setScheduleStaff(e.target.value)} /></label><label className="text-xs font-bold">Chu kỳ (tháng)<input className="input mt-1 block" required type="number" min="1" value={scheduleMonths} onChange={e => setScheduleMonths(e.target.value)} /></label><label className="text-xs font-bold">Ngày tiếp theo<input className="input mt-1 block" required type="date" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)} /></label><button className="primary-button">Tạo lịch</button></form>}</div>
+    {error && <p className="mb-4 text-sm text-red-600">{error}</p>}<section className="stats-grid mb-6"><MiniStat label="Thiết bị trong danh sách" value={String(items.length)} /><MiniStat label="Cần sửa / hỏng" value={String(items.filter(a => a.status !== "GOOD").length)} tone="amber" /><MiniStat label="Lịch bảo trì" value={String(schedules.length)} tone="sky" /></section>
+    {tab === "Thiết bị" ? <article className="panel overflow-x-auto"><table className="data-table"><thead><tr><th>Thiết bị</th><th>Mã phòng / tòa</th><th>Bảo hành</th><th>Tình trạng</th><th></th></tr></thead><tbody>{items.map(a => <tr key={a.id}><td><b>{a.name}</b><div className="sub">#{a.id}</div></td><td>Phòng {a.roomId} · Tòa {a.buildingId}</td><td>{a.warrantyEndDate ? <>{a.warrantyProvider}<div className="sub">{a.warrantyStartDate} – {a.warrantyEndDate} · {a.warrantyActive ? "Còn hạn" : "Hết hạn"}</div></> : "Chưa khai báo"}</td><td><select className="select" value={a.status} onChange={e => void setStatus(a, e.target.value)}><option value="GOOD">Tốt</option><option value="NEEDS_REPAIR">Cần sửa</option><option value="BROKEN">Hỏng</option></select></td><td><button className="text-button" onClick={() => void warranty(a)}>Cập nhật BH</button></td></tr>)}</tbody></table>{items.length === 0 && <p className="p-8 text-center text-sm text-muted">Chưa có thiết bị hoặc nhập mã tòa nhà để lọc.</p>}</article> : <div className="grid gap-4 md:grid-cols-2">{schedules.map(s => <article key={s.id} className="panel p-5"><Pill tone="sky">Mỗi {s.intervalMonths} tháng</Pill><h3 className="mt-3 font-bold">{s.title}</h3><p className="text-sm text-muted">{s.description}</p><div className="mt-3 text-xs">Tòa #{s.buildingId} · KTV #{s.staffId}<br/>Lần tới: {s.nextDate}{s.lastDoneDate && ` · Lần trước: ${s.lastDoneDate}`}</div><button className="secondary-button mt-4" onClick={async () => { try { await assetApi.completeSchedule(s.id); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Không cập nhật được lịch."); } }}>Đánh dấu hoàn tất</button></article>)}{schedules.length === 0 && <div className="panel p-8 text-sm text-muted">Chưa có lịch bảo trì định kỳ.</div>}</div>}
+  </>;
 }

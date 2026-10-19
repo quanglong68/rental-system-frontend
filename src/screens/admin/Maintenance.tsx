@@ -1,46 +1,21 @@
-import { Icon, PageHead, Pill, toVNTime, type Tone } from "../../components/ui";
+import { useEffect, useState } from "react";
+import { PageHead, Pill, toVNTime, type Tone } from "../../components/ui";
+import { assetApi, type MaintenanceReport, type MaintenanceRequest } from "../../api/assetMaintenance";
 
-const cols: { title: string; tone: Tone; items: { id: string; title: string; room: string; prio: string; who?: string; at: string }[] }[] = [
-  { title: "Mới tiếp nhận", tone: "coral", items: [
-    { id: "BT-219", title: "Rò rỉ nước bồn rửa", room: "B.305 · Fern House", prio: "Cao", at: "2026-10-04T01:20:00Z" },
-    { id: "BT-218", title: "Wifi chập chờn tầng 3", room: "Tầng 3 · An Nhiên", prio: "Trung bình", at: "2026-10-03T13:05:00Z" },
-  ] },
-  { title: "Đã phân công", tone: "amber", items: [
-    { id: "BT-215", title: "Thay bóng đèn hành lang", room: "Tầng 2 · Mộc", prio: "Thấp", who: "Ng. Văn Tài", at: "2026-10-03T02:00:00Z" },
-  ] },
-  { title: "Đang xử lý", tone: "sky", items: [
-    { id: "BT-211", title: "Máy lạnh không lạnh", room: "C.201 · Mộc", prio: "Cao", who: "Trần Minh", at: "2026-10-02T08:30:00Z" },
-    { id: "BT-209", title: "Khóa cửa bị kẹt", room: "A.108 · An Nhiên", prio: "Trung bình", who: "Ng. Văn Tài", at: "2026-10-02T04:10:00Z" },
-  ] },
-  { title: "Hoàn tất", tone: "teal", items: [
-    { id: "BT-204", title: "Sửa máy lạnh", room: "A.402 · Fern House", prio: "Cao", who: "Trần Minh", at: "2026-10-01T03:45:00Z" },
-  ] },
-];
-const prioTone: Record<string, Tone> = { Cao: "coral", "Trung bình": "amber", Thấp: "slate" };
+const statusLabel: Record<string, string> = { ASSIGNED: "Đã phân công", IN_PROGRESS: "Đang xử lý", COMPLETED: "Hoàn tất" };
+const priorityLabel: Record<string, string> = { LOW: "Thấp", MEDIUM: "Trung bình", HIGH: "Cao", URGENT: "Khẩn cấp" };
+const tone: Record<string, Tone> = { LOW: "slate", MEDIUM: "amber", HIGH: "coral", URGENT: "coral" };
 
 export default function Maintenance() {
-  return (
-    <>
-      <PageHead eyebrow="Vận hành kỹ thuật" title="Bảo trì & Sửa chữa" desc="Phiếu yêu cầu từ khách thuê được phân công cho nhân viên KỸ THUẬT của từng tòa nhà."
-        actions={<><select className="select !h-[42px]"><option>Tất cả tòa nhà</option><option>The Fern House</option></select><button className="primary-button"><Icon name="plus" size={16} /> Tạo phiếu</button></>} />
-      <div className="kanban">
-        {cols.map((c) => (
-          <section key={c.title} className="kanban-col">
-            <header><span className={`dot dot-${c.tone}`}></span><b>{c.title}</b><span className="ml-auto text-xs font-bold text-muted">{c.items.length}</span></header>
-            {c.items.map((t) => (
-              <article key={t.id} className="ticket">
-                <div className="flex items-center justify-between"><span className="font-mono text-[11px] font-bold text-muted">{t.id}</span><Pill tone={prioTone[t.prio]}>{t.prio}</Pill></div>
-                <h3>{t.title}</h3>
-                <div className="flex items-center gap-1 text-xs text-muted"><Icon name="pin" size={12} />{t.room}</div>
-                <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
-                  {t.who ? <span className="flex items-center gap-1.5 font-semibold"><span className="avatar-chip !h-6 !w-6">{t.who.split(" ").pop()![0]}</span>{t.who}</span> : <button className="text-button">Phân công</button>}
-                  <span className="text-muted">{toVNTime(t.at, true)}</span>
-                </div>
-              </article>
-            ))}
-          </section>
-        ))}
-      </div>
-    </>
-  );
+  const [buildingId, setBuildingId] = useState(""); const [staffId, setStaffId] = useState(""); const [priority, setPriority] = useState("MEDIUM"); const [scheduledAt, setScheduledAt] = useState(""); const [reports, setReports] = useState<MaintenanceReport[]>([]); const [requests, setRequests] = useState<MaintenanceRequest[]>([]); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const refresh = async () => { if (!buildingId) return; try { setError(""); const [r, m] = await Promise.all([assetApi.reports(Number(buildingId), "PENDING"), assetApi.requests(`?buildingId=${buildingId}`)]); setReports(r); setRequests(m); } catch (e) { setError(e instanceof Error ? e.message : "Không tải được dữ liệu."); } };
+  useEffect(() => { if (buildingId) void refresh(); }, [buildingId]);
+  const approve = async (r: MaintenanceReport) => { if (!staffId || !scheduledAt) { setError("Nhập mã KTV và giờ hẹn trước khi phân công."); return; } setBusy(true); try { await assetApi.approve(r.id, { staffId: Number(staffId), priority, scheduledAt: new Date(scheduledAt).toISOString() }); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Không thể phân công."); } finally { setBusy(false); } };
+  const reject = async (r: MaintenanceReport) => { const reason = window.prompt("Lý do từ chối báo hỏng:"); if (!reason?.trim()) return; try { await assetApi.reject(r.id, reason); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Không thể từ chối báo cáo."); } };
+  return <><PageHead eyebrow="Vận hành kỹ thuật" title="Bảo trì & Sửa chữa" desc="Báo cáo hỏng chờ xử lý và các phiếu bảo trì của tòa nhà." actions={<button className="secondary-button" onClick={() => void refresh()}>Tải lại</button>} />
+    <div className="panel mb-5 flex flex-wrap items-end gap-4 p-4"><label className="text-xs font-bold">Mã tòa nhà<input className="input mt-1 block" type="number" value={buildingId} onChange={e => setBuildingId(e.target.value)} placeholder="buildingId" /></label><label className="text-xs font-bold">Mã KTV<input className="input mt-1 block" type="number" value={staffId} onChange={e => setStaffId(e.target.value)} placeholder="staffId" /></label><label className="text-xs font-bold">Ưu tiên<select className="select mt-1 block" value={priority} onChange={e => setPriority(e.target.value)}><option value="LOW">Thấp</option><option value="MEDIUM">Trung bình</option><option value="HIGH">Cao</option><option value="URGENT">Khẩn cấp</option></select></label><label className="text-xs font-bold">Giờ hẹn<input className="input mt-1 block" type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} /></label></div>
+    {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+    <div className="grid gap-5 xl:grid-cols-2"><section className="panel"><div className="panel-header"><div><h2>Báo hỏng đang chờ</h2><p>{reports.length} báo cáo</p></div></div>{reports.map(r => <article key={r.id} className="approval !items-start !flex-wrap"><div className="min-w-[220px] flex-1"><b>{r.title}</b><p className="text-sm">{r.description}</p><div className="text-xs text-muted">Báo cáo #{r.id} · Phòng {r.roomId} · {toVNTime(r.createdAt, true)}</div><div className="mt-2 flex gap-2">{r.imageUrls?.map(url => <a key={url} href={url} target="_blank" rel="noreferrer"><img src={url} className="h-14 w-14 rounded object-cover" /></a>)}</div></div><div className="flex gap-2"><button disabled={busy} className="primary-button !h-9" onClick={() => void approve(r)}>Phân công</button><button className="secondary-button !h-9" onClick={() => void reject(r)}>Từ chối</button></div></article>)}{reports.length === 0 && <p className="p-5 text-sm text-muted">Chọn mã tòa nhà để xem báo cáo đang chờ.</p>}</section>
+    <section className="panel"><div className="panel-header"><div><h2>Phiếu bảo trì</h2><p>Phiếu của tòa nhà đã chọn</p></div></div>{requests.map(m => <article key={m.id} className="approval"><div className="min-w-[180px] flex-1"><b>Phiếu #{m.id} · Phòng {m.roomId}</b><div className="text-xs text-muted">KTV #{m.staffId} · Lịch {toVNTime(m.scheduledAt, true)}</div></div><Pill tone={tone[m.priority]}>{priorityLabel[m.priority]}</Pill><Pill tone={m.status === "COMPLETED" ? "teal" : m.status === "IN_PROGRESS" ? "sky" : "amber"}>{statusLabel[m.status]}</Pill></article>)}{requests.length === 0 && <p className="p-5 text-sm text-muted">Chưa có phiếu bảo trì.</p>}</section></div>
+  </>;
 }

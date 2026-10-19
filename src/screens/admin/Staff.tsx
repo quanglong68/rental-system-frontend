@@ -1,79 +1,82 @@
-import { useState } from "react";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, useToast, type Tone } from "../../components/ui";
+import { useEffect, useState } from "react";
+import { Drawer, Field, Icon, MiniStat, PageHead, useToast } from "../../components/ui";
+import { getStaff, getStaffBuildings, replaceStaffBuildings, updateStaff, type UserProfile } from "../../api/userNotification";
 
-const allBuildings = ["The Fern House", "Căn hộ An Nhiên", "Mộc Residence", "Lam Garden"];
-type Member = (typeof staff)[number];
-
-const roles: Record<string, { label: string; tone: Tone }> = { QUAN_LY: { label: "Quản lý", tone: "violet" }, KY_THUAT: { label: "Kỹ thuật", tone: "sky" }, SALE: { label: "Sale", tone: "amber" } };
-const staff = [
-  { name: "Lê Quốc Bảo", email: "bao.le@nhaminh.vn", role: "QUAN_LY", building: "The Fern House", active: true, kpi: "46/50 phòng" },
-  { name: "Phạm Thu Hà", email: "ha.pham@nhaminh.vn", role: "QUAN_LY", building: "Căn hộ An Nhiên", active: true, kpi: "31/36 phòng" },
-  { name: "Trần Minh", email: "minh.tran@nhaminh.vn", role: "KY_THUAT", building: "Fern House, Mộc", active: true, kpi: "18 phiếu / tháng" },
-  { name: "Nguyễn Văn Tài", email: "tai.nguyen@nhaminh.vn", role: "KY_THUAT", building: "An Nhiên, Mộc", active: true, kpi: "12 phiếu / tháng" },
-  { name: "Đinh Khánh Linh", email: "linh.dinh@nhaminh.vn", role: "SALE", building: "The Fern House", active: true, kpi: "7 hợp đồng mới" },
-  { name: "Hồ Gia Bảo", email: "giabao.ho@nhaminh.vn", role: "SALE", building: "Lam Garden", active: false, kpi: "—" },
-];
+type Member = UserProfile;
 
 export default function Staff() {
-  const [tab, setTab] = useState("Tất cả");
-  const [rows, setRows] = useState(staff);
-  const [edit, setEdit] = useState<Member | "new" | null>(null);
-  const [assigned, setAssigned] = useState<string[]>([]);
-  const [role, setRole] = useState("SALE");
+  const [rows, setRows] = useState<Member[]>([]);
+  const [edit, setEdit] = useState<Member | null>(null);
+  const [assigned, setAssigned] = useState("");
+  const [form, setForm] = useState({ fullName: "", phone: "", email: "", position: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
   const [toast, show] = useToast();
-  const list = tab === "Tất cả" ? rows : rows.filter((s) => roles[s.role].label === tab);
-  const m = edit && edit !== "new" ? edit : null;
-  const openForm = (x: Member | "new") => { setEdit(x); setRole(x === "new" ? "SALE" : x.role); setAssigned(x === "new" ? [] : allBuildings.filter((b) => x.building.split(", ").some((p) => b.includes(p)))); };
-  const save = () => {
-    const building = assigned.join(", ") || "Chưa phân công";
-    if (m) setRows(rows.map((r) => (r.email === m.email ? { ...r, role, building } : r)));
-    else setRows([{ name: "Nhân viên mới", email: "moi@nhaminh.vn", role, building, active: true, kpi: "—" }, ...rows]);
-    setEdit(null); show(m ? "Đã cập nhật nhân viên" : "Đã tạo tài khoản và gửi mật khẩu tạm qua email");
+  const loadStaff = async () => {
+    setLoading(true); setError("");
+    try { setRows((await getStaff(0, 100)).content); }
+    catch (e) { setError(e instanceof Error ? e.message : "Không tải được danh sách nhân viên."); }
+    finally { setLoading(false); }
   };
+  useEffect(() => { void loadStaff(); }, []);
+  const openForm = async (person: Member) => {
+    setEdit(person);
+    setForm({ fullName: person.fullName ?? "", phone: person.phone ?? "", email: person.email ?? "", position: person.position ?? "" });
+    setAssigned((person.buildingIds ?? []).join(", "));
+    try { setAssigned((await getStaffBuildings(person.id)).join(", ")); }
+    catch (e) { setError(e instanceof Error ? e.message : "Không tải được tòa nhà được phân công."); }
+  };
+  const save = async () => {
+    if (!edit) return;
+    const buildingIds = assigned.split(",").map((value) => value.trim()).filter(Boolean).map(Number);
+    if (buildingIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      setError("Mã tòa nhà phải là số nguyên dương, ngăn cách bằng dấu phẩy."); return;
+    }
+    setSaving(true); setError("");
+    try {
+      await updateStaff(edit.id, { ...form, phone: form.phone.trim() || null, email: form.email.trim() || null, position: form.position.trim() || null });
+      await replaceStaffBuildings(edit.id, buildingIds);
+      await loadStaff(); setEdit(null); show("Đã cập nhật nhân viên");
+    } catch (e) { setError(e instanceof Error ? e.message : "Không lưu được thông tin nhân viên."); }
+    finally { setSaving(false); }
+  };
+  const list = rows.filter((person) => `${person.fullName} ${person.email ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   return (
     <>
-      <PageHead eyebrow="ADMIN · Toàn hệ thống" title="Nhân sự" desc="Tạo tài khoản STAFF, gán vai trò QUAN_LY / KY_THUAT / SALE và phân công theo tòa nhà."
-        actions={<button className="primary-button" onClick={() => openForm("new")}><Icon name="plus" size={16} /> Thêm nhân viên</button>} />
+      <PageHead eyebrow="ADMIN · Toàn hệ thống" title="Nhân sự" desc="Xem và cập nhật hồ sơ nhân viên cùng mã các tòa nhà được phân công." />
       <section className="stats-grid mb-6">
-        <MiniStat label="Tổng nhân sự" value="14" note="13 đang hoạt động" />
-        <MiniStat label="Quản lý" value="3" note="1 tòa nhà còn trống" tone="violet" />
-        <MiniStat label="Kỹ thuật" value="5" note="Trung bình 3,1 phiếu / ngày" tone="sky" />
-        <MiniStat label="Sale" value="6" note="21 hợp đồng mới quý này" tone="amber" />
+        <MiniStat label="Nhân viên" value={String(rows.length)} note={loading ? "Đang đồng bộ" : "Dữ liệu từ user-notification-service"} />
       </section>
       <article className="panel">
-        <Toolbar placeholder="Tìm tên, email..."><Tabs items={["Tất cả", "Quản lý", "Kỹ thuật", "Sale"]} value={tab} onChange={setTab} /></Toolbar>
+        <div className="toolbar"><label className="field-search"><Icon name="search" size={16} /><input placeholder="Tìm tên, email..." value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Tìm nhân viên" /></label></div>
+        {error && <p className="alert alert-error mx-4 mt-4">{error}</p>}
         <div className="overflow-x-auto">
           <table className="data-table">
-            <thead><tr><th>Nhân viên</th><th>Vai trò</th><th>Tòa nhà phụ trách</th><th>Hiệu suất</th><th>Trạng thái</th><th></th></tr></thead>
-            <tbody>{list.map((s) => (
-              <tr key={s.email} className={s.active ? "" : "opacity-60"}>
-                <td><div className="flex items-center gap-3"><span className="avatar-chip !h-9 !w-9">{s.name.split(" ").pop()![0]}</span><div><b>{s.name}</b><div className="sub">{s.email}</div></div></div></td>
-                <td><Pill tone={roles[s.role].tone}>{s.role}</Pill></td>
-                <td className="text-[13px]">{s.building}</td>
-                <td className="text-[13px] font-semibold">{s.kpi}</td>
-                <td>{s.active ? <span className="flex items-center gap-1.5 text-xs font-bold text-teal"><span className="dot dot-teal"></span>Hoạt động</span> : <span className="flex items-center gap-1.5 text-xs font-bold text-muted"><span className="dot dot-slate"></span>Tạm khóa</span>}</td>
-                <td><button className="text-button" onClick={() => openForm(s)}>Sửa <Icon name="chevron" size={12} /></button></td>
+            <thead><tr><th>Nhân viên</th><th>Chức vụ</th><th>Mã tòa nhà</th><th></th></tr></thead>
+            <tbody>{list.map((person) => (
+              <tr key={person.id}>
+                <td><div className="flex items-center gap-3"><span className="avatar-chip !h-9 !w-9">{person.fullName?.trim().split(" ").pop()?.[0] ?? "?"}</span><div><b>{person.fullName}</b><div className="sub">{person.email || person.phone || "Chưa có email hoặc số điện thoại"}</div></div></div></td>
+                <td className="text-[13px]">{person.isAdmin ? "Quản trị viên" : person.position || "Chưa cập nhật"}</td>
+                <td className="text-[13px]">{person.buildingIds?.length ? person.buildingIds.map((id) => `#${id}`).join(", ") : "Chưa phân công"}</td>
+                <td><button className="text-button" onClick={() => void openForm(person)}>Sửa <Icon name="chevron" size={12} /></button></td>
               </tr>))}
+              {!loading && list.length === 0 && <tr><td colSpan={4} className="text-center text-muted">Không có nhân viên phù hợp.</td></tr>}
+              {loading && <tr><td colSpan={4} className="text-center text-muted">Đang tải danh sách…</td></tr>}
             </tbody>
           </table>
         </div>
       </article>
-      <Drawer open={!!edit} eyebrow="Nhân sự" title={m ? m.name : "Thêm nhân viên"} onClose={() => setEdit(null)}
-        footer={<>{m && <button className="danger-button mr-auto" onClick={() => { setRows(rows.map((r) => (r.email === m.email ? { ...r, active: !r.active } : r))); setEdit(null); show(m.active ? "Đã tạm khóa tài khoản" : "Đã mở khóa tài khoản"); }}>{m.active ? "Tạm khóa" : "Mở khóa"}</button>}<button className="secondary-button" onClick={() => setEdit(null)}>Hủy</button><button className="primary-button" onClick={save}>{m ? "Lưu" : "Tạo tài khoản"}</button></>}>
-        <div className="form-grid" key={m?.email ?? "new"}>
-          <div className="span-2"><Field label="Họ tên"><input defaultValue={m?.name} placeholder="Nguyễn Văn A" /></Field></div>
-          <Field label="Email đăng nhập"><input defaultValue={m?.email} placeholder="ten@nhaminh.vn" /></Field>
-          <Field label="Số điện thoại"><input placeholder="09xxxxxxxx" defaultValue={m ? "0901234567" : ""} /></Field>
-          <div className="span-2"><Field label="Vai trò">
-            <div className="grid grid-cols-3 gap-2">{Object.entries(roles).map(([k, v]) => (
-              <button key={k} type="button" onClick={() => setRole(k)} className={`rounded-xl border p-3 text-left transition ${role === k ? "border-teal bg-[#eef8f4] ring-2 ring-teal/20" : "border-line"}`}><b className="block text-sm">{v.label}</b><span className="font-mono text-[10px] text-muted">{k}</span></button>
-            ))}</div>
-          </Field></div>
-          <div className="span-2"><Field label="Tòa nhà phụ trách" hint={role === "QUAN_LY" ? "Quản lý chỉ thấy dữ liệu của tòa được gán" : "Có thể gán nhiều tòa"}>
-            <div className="grid grid-cols-2 gap-2">{allBuildings.map((b) => { const on = assigned.includes(b); return (
-              <button key={b} type="button" onClick={() => setAssigned(on ? assigned.filter((x) => x !== b) : [...assigned, b])} className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-semibold ${on ? "border-teal bg-[#eef8f4] text-teal" : "border-line"}`}>
-                <span className={`grid h-4 w-4 place-items-center rounded ${on ? "bg-teal text-white" : "border border-line"}`}>{on && <Icon name="check" size={11} />}</span>{b}</button>); })}</div>
-          </Field></div>
+      <Drawer open={!!edit} eyebrow="Nhân sự" title={edit?.fullName ?? "Sửa nhân viên"} onClose={() => setEdit(null)}
+        footer={<><button className="secondary-button" onClick={() => setEdit(null)}>Hủy</button><button className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? "Đang lưu…" : "Lưu thay đổi"}</button></>}>
+        <div className="form-grid" key={edit?.id ?? "none"}>
+          <div className="span-2"><Field label="Họ tên"><input value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} placeholder="Nguyễn Văn A" /></Field></div>
+          <Field label="Email"><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="ten@example.com" /></Field>
+          <Field label="Số điện thoại"><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="09xxxxxxxx" /></Field>
+          <div className="span-2"><Field label="Chức vụ"><input value={form.position} onChange={(event) => setForm({ ...form, position: event.target.value })} placeholder="Quản lý, kỹ thuật…" /></Field></div>
+          <div className="span-2"><Field label="Mã tòa nhà" hint="Nhập ID số, ngăn cách bằng dấu phẩy. Backend hiện chưa cung cấp danh sách tên tòa nhà."><input value={assigned} onChange={(event) => setAssigned(event.target.value)} placeholder="1, 2" /></Field></div>
+          {error && <p className="field-error span-2">{error}</p>}
         </div>
       </Drawer>
       {toast}
