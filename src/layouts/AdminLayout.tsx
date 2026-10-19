@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { Navigate, NavLink, useLocation, useNavigate, useParams } from "react-router";
 import { useAuth, type Role } from "../lib/auth";
-import { Icon, type IconName } from "../components/ui";
+import { Icon, toVNTime, type IconName } from "../components/ui";
+import { getNotifications, notificationKind, type NotificationItem } from "../api/userNotification";
+import { useNotifications } from "../lib/notifications";
 import Dashboard from "../screens/admin/Dashboard";
 import Buildings from "../screens/admin/Buildings";
 import Rooms from "../screens/admin/Rooms";
@@ -31,13 +33,6 @@ const adminNav: NavItem[] = [
   { label: "Khách thuê & Ở ghép", path: "tenants", icon: "users" },
   { label: "Nhân sự", path: "staff", icon: "shield" },
   { label: "Báo cáo", path: "reports", icon: "chart" },
-];
-
-const activities = [
-  { initials: "HT", color: "bg-amber-100 text-amber-700", name: "Hoàng Thị Mai", action: "đã thanh toán hóa đơn", detail: "HĐ-0425 · 3.650.000 ₫", time: "10 phút trước" },
-  { initials: "KT", color: "bg-sky-100 text-sky-700", name: "Kỹ thuật viên Minh", action: "đã hoàn tất phiếu sửa chữa", detail: "Máy lạnh phòng A.402", time: "42 phút trước" },
-  { initials: "NL", color: "bg-violet-100 text-violet-700", name: "Nguyễn Lam", action: "gửi yêu cầu thuê phòng", detail: "Phòng B.305 · The Fern House", time: "1 giờ trước" },
-  { initials: "HN", color: "bg-emerald-100 text-emerald-700", name: "Hệ thống", action: "đã tạo tin đăng tự động", detail: "Phòng C.201 chuyển sang sắp trống", time: "2 giờ trước" },
 ];
 
 const roles: Record<StaffRole, { user: string; initials: string; title: string; scope: string; nav: NavItem[] }> = {  ADMIN: { user: "Trần Minh Anh", initials: "TA", title: "Quản trị viên", scope: "Toàn hệ thống", nav: adminNav },
@@ -70,6 +65,9 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([]);
+  const [notificationError, setNotificationError] = useState("");
+  const { unreadCount, markRead, markAllRead } = useNotifications();
   if (initializing) return null;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
   if (user.role === "CUSTOMER") return <Navigate to="/my-room" replace />;
@@ -102,6 +100,16 @@ export default function AdminLayout() {
     "Tài sản": <Assets />,
   };
   const screen = screens[activeNav];
+
+  const toggleNotifications = () => {
+    const opening = !notificationsOpen;
+    setNotificationsOpen(opening);
+    if (!opening) return;
+    setNotificationError("");
+    void getNotifications(0, false, 5)
+      .then((page) => setNotificationItems(page.content))
+      .catch(() => setNotificationError("Không tải được thông báo. Vui lòng thử lại."));
+  };
 
   const Sidebar = () => (
     <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
@@ -165,16 +173,22 @@ export default function AdminLayout() {
               <span>⌘ K</span>
             </label>
             <div className="relative">
-              <button className="icon-button relative" onClick={() => setNotificationsOpen(!notificationsOpen)} aria-label="Thông báo">
-                <Icon name="bell" size={19} /><i></i>
+              <button className="icon-button relative" onClick={toggleNotifications} aria-label="Thông báo">
+                <Icon name="bell" size={19} />{unreadCount > 0 && <i></i>}
               </button>
               {notificationsOpen && (
                 <div className="notification-panel">
                   <div className="flex items-center justify-between border-b border-line p-4">
-                    <strong>Thông báo</strong><button className="text-xs font-bold text-teal">Đánh dấu đã đọc</button>
+                    <strong>Thông báo · {unreadCount} chưa đọc</strong><button className="text-xs font-bold text-teal disabled:opacity-40" disabled={!unreadCount} onClick={() => void markAllRead().then(() => setNotificationItems((items) => items.map((item) => ({ ...item, isRead: true })))).catch(() => setNotificationError("Không thể cập nhật thông báo. Vui lòng thử lại."))}>Đánh dấu đã đọc</button>
                   </div>
                   <div className="p-2">
-                    {activities.slice(0, 3).map((a) => <div key={a.detail} className="rounded-xl p-3 text-xs hover:bg-slate-50"><b>{a.name}</b> {a.action}<div className="mt-1 text-muted">{a.time}</div></div>)}
+                    {notificationError && <p className="p-3 text-xs text-[#a63e28]">{notificationError}</p>}
+                    {!notificationError && notificationItems.length === 0 && <p className="p-3 text-xs text-muted">Chưa có thông báo.</p>}
+                    {notificationItems.map((item) => <button key={item.id} type="button" className={`w-full rounded-xl p-3 text-left text-xs hover:bg-slate-50 ${item.isRead ? "opacity-65" : ""}`} onClick={() => {
+                      if (!item.isRead) void markRead(item.id)
+                        .then(() => setNotificationItems((items) => items.map((value) => value.id === item.id ? { ...value, isRead: true } : value)))
+                        .catch(() => setNotificationError("Không thể cập nhật thông báo. Vui lòng thử lại."));
+                    }}><b className="block">{item.title}</b><span>{item.content}</span><div className="mt-1 text-muted">{notificationKind(item.type)} · {toVNTime(item.createdAt, true)}</div></button>)}
                   </div>
                 </div>
               )}

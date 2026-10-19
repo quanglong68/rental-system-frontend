@@ -2,8 +2,9 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { Icon, toVNTime } from "../components/ui";
-import { notiStore, useNotis } from "../mocks/notifications";
+import { getNotifications, notificationKind, type NotificationItem } from "../api/userNotification";
 import { homeFor, useAuth } from "../lib/auth";
+import { useNotifications } from "../lib/notifications";
 import "../screens/customer/customer.css";
 
 const publicTabs = [{ to: "/", label: "Khám phá", icon: "search" as const }];
@@ -31,12 +32,27 @@ export default function CustomerLayout() {
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
   const [bell, setBell] = useState(false);
-  const notis = useNotis();
-  const unread = notis.filter((n) => !n.read).length;
+  const [bellItems, setBellItems] = useState<NotificationItem[]>([]);
+  const [bellLoading, setBellLoading] = useState(false);
+  const [bellError, setBellError] = useState("");
+  const { unreadCount, markRead } = useNotifications();
   const isCustomer = user?.role === "CUSTOMER";
   const tabs = isCustomer ? memberTabs : publicTabs;
   const initials = user ? user.fullName.split(" ").slice(-2).map((w) => w[0]).join("") : "";
   const authPage = loc.pathname === "/login" || loc.pathname === "/register";
+
+  const toggleBell = () => {
+    const opening = !bell;
+    setBell(opening);
+    setMenu(false);
+    if (!opening) return;
+    setBellLoading(true);
+    setBellError("");
+    void getNotifications(0, false, 5)
+      .then((page) => setBellItems(page.content))
+      .catch(() => setBellError("Không tải được thông báo. Vui lòng thử lại."))
+      .finally(() => setBellLoading(false));
+  };
 
   return (
     <div className="cx">
@@ -58,17 +74,24 @@ export default function CustomerLayout() {
           </nav>
           {user ? (
             <div className="relative flex items-center gap-2">
-              {isCustomer && <button className="cx-icon" aria-label="Thông báo" onClick={() => { setBell(!bell); setMenu(false); }}><Icon name="bell" size={18} />{unread > 0 && <i />}</button>}
+              {isCustomer && <button className="cx-icon" aria-label="Thông báo" onClick={toggleBell}><Icon name="bell" size={18} />{unreadCount > 0 && <i />}</button>}
               <button className="cx-avatar" onClick={() => { setMenu(!menu); setBell(false); }}>{initials}</button>
               <AnimatePresence>
                 {bell && (
                   <motion.div className="cx-dropdown" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.97 }}>
-                    <div className="flex items-center justify-between py-1"><b className="text-sm">Thông báo</b><span className="cx-meta">{unread} chưa đọc</span></div>
-                    {notis.slice(0, 4).map((n) => (
-                      <div key={n.id} className={`cx-noti ${n.read ? "read" : ""}`} onClick={() => notiStore.markRead(n.id)}>
+                    <div className="flex items-center justify-between py-1"><b className="text-sm">Thông báo</b><span className="cx-meta">{unreadCount} chưa đọc</span></div>
+                    {bellLoading && <p className="py-4 text-center text-sm text-[#6b777d]">Đang tải thông báo…</p>}
+                    {bellError && <p className="py-3 text-sm text-[#a63e28]">{bellError}</p>}
+                    {!bellLoading && !bellError && bellItems.length === 0 && <p className="py-4 text-center text-sm text-[#6b777d]">Chưa có thông báo.</p>}
+                    {bellItems.map((n) => (
+                      <button key={n.id} type="button" className={`cx-noti w-full text-left ${n.isRead ? "read" : ""}`} onClick={() => {
+                        if (!n.isRead) void markRead(n.id)
+                          .then(() => setBellItems((items) => items.map((item) => item.id === n.id ? { ...item, isRead: true } : item)))
+                          .catch(() => setBellError("Không thể cập nhật thông báo. Vui lòng thử lại."));
+                      }}>
                         <span className="dot" />
-                        <span className="flex-1"><b className="block text-[13px]">{n.title}</b><small className="cx-meta">{n.kind} · {toVNTime(n.at, true)}</small></span>
-                      </div>
+                        <span className="flex-1"><b className="block text-[13px]">{n.title}</b><small className="cx-meta">{notificationKind(n.type)} · {toVNTime(n.createdAt, true)}</small></span>
+                      </button>
                     ))}
                     <Link to="/profile#notifications" className="cx-btn ghost !mt-2 !h-10 w-full" onClick={() => setBell(false)}>Xem tất cả thông báo</Link>
                   </motion.div>
