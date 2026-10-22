@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch } from "@/shared/api/httpClient";
 
 export type UserProfile = {
   id: number;
