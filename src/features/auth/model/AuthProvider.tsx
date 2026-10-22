@@ -12,6 +12,7 @@ type Ctx = {
   login: (username: string, password: string) => Promise<User>;
   register: (data: { fullName: string; username: string; password: string }) => Promise<User>;
   logout: () => Promise<void>;
+  updateFullName: (fullName: string) => void;
 };
 
 const AuthContext = createContext<Ctx | null>(null);
@@ -63,7 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  return <AuthContext.Provider value={{ user, initializing, login, register, logout }}>{children}</AuthContext.Provider>;
+  const updateFullName: Ctx["updateFullName"] = useCallback((fullName) => {
+    setUser((current) => current ? { ...current, fullName } : current);
+  }, []);
+
+  return <AuthContext.Provider value={{ user, initializing, login, register, logout, updateFullName }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
