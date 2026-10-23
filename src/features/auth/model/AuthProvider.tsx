@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         if (!getRefreshToken()) return;
         const me = await fetchMe();
-        if (!cancelled) setUser(toUser(me.username, me.accountType, me.roles));
+        if (!cancelled) setUser(toUser(me.accountId, me.username, me.accountType, me.roles));
       } catch {
         if (!cancelled) {
           clearSession();
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login: Ctx["login"] = useCallback(async (username, password) => {
     const res = await apiLogin(username, password);
-    const u = toUser(res.account.username, res.account.accountType, res.account.roles);
+    const u = toUser(res.account.id, res.account.username, res.account.accountType, res.account.roles);
     setUser(u);
     return u;
   }, []);
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiRegister({ fullName, username, password });
     // Register BE chỉ trả 201 không kèm token → login ngay để lấy cặp token thật.
     const res = await apiLogin(username, password);
-    const u = toUser(res.account.username, res.account.accountType, res.account.roles, fullName);
+    const u = toUser(res.account.id, res.account.username, res.account.accountType, res.account.roles, fullName);
     setUser(u);
     return u;
   }, []);

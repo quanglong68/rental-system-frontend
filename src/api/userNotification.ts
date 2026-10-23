@@ -52,8 +52,10 @@ export const markNotificationRead = (id: number) =>
 export const markAllNotificationsRead = () =>
   apiFetch<void>("/api/v1/notifications/read-all", { method: "PUT" });
 
-export const getStaff = (page = 0, size = 20) =>
-  apiFetch<PageResponse<UserProfile>>(`/api/v1/staff?page=${page}&size=${size}`);
+export const getStaff = (page = 0, size = 20, buildingId?: number) =>
+  apiFetch<PageResponse<UserProfile>>(
+    `/api/v1/staff?page=${page}&size=${size}${buildingId !== undefined ? `&buildingId=${buildingId}` : ""}`,
+  );
 
 export const updateStaff = (id: number, body: ProfileUpdate & { position: string | null }) =>
   apiFetch<UserProfile>(`/api/v1/staff/${id}`, { method: "PUT", body });
