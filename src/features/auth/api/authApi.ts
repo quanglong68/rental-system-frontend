@@ -15,8 +15,14 @@ export function mapRole(accountType: string, roles: string[] | undefined): Role 
   return "UNKNOWN";
 }
 
-export function toUser(username: string, accountType: string, roles: string[] | undefined, fullName?: string): User {
-  return { sub: username, fullName: fullName?.trim() || username, role: mapRole(accountType, roles) };
+export function toUser(
+  accountId: number,
+  username: string,
+  accountType: string,
+  roles: string[] | undefined,
+  fullName?: string,
+): User {
+  return { id: accountId, sub: username, fullName: fullName?.trim() || username, role: mapRole(accountType, roles) };
 }
 
 export type RegisterInput = { fullName: string; username: string; password: string };

@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Icon, toVNTime } from "@/shared/ui";
-import { notiStore, useNotis } from "@/features/notifications";
+import {
+  getNotifications,
+  getUnreadCount,
+  markNotificationRead,
+  notificationKind,
+  type NotificationItem,
+} from "@/api/userNotification";
 import { useAuth } from "@/features/auth";
 import "./customer.css";
 
@@ -21,8 +27,36 @@ export default function CustomerLayout() {
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
   const [bell, setBell] = useState(false);
-  const notis = useNotis();
-  const unread = notis.filter((n) => !n.read).length;
+  const [notis, setNotis] = useState<NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
+
+  const fetchNotis = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [listRes, count] = await Promise.all([
+        getNotifications(0, false, 5),
+        getUnreadCount(),
+      ]);
+      setNotis(listRes.content || []);
+      setUnread(count);
+    } catch {
+      // background poll error ignored
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void fetchNotis();
+  }, [fetchNotis]);
+
+  const handleMarkRead = async (id: number) => {
+    try {
+      await markNotificationRead(id);
+      setNotis((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+      setUnread((c) => Math.max(0, c - 1));
+    } catch {
+      // ignored
+    }
+  };
   const isCustomer = user?.role === "CUSTOMER";
   const isStaff = !!user && user.role !== "CUSTOMER" && user.role !== "UNKNOWN";
   const tabs = isCustomer ? memberTabs : publicTabs;
@@ -55,12 +89,19 @@ export default function CustomerLayout() {
                 {bell && (
                   <motion.div className="cx-dropdown" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.97 }}>
                     <div className="flex items-center justify-between py-1"><b className="text-sm">Thông báo</b><span className="cx-meta">{unread} chưa đọc</span></div>
-                    {notis.slice(0, 4).map((n) => (
-                      <div key={n.id} className={`cx-noti ${n.read ? "read" : ""}`} onClick={() => notiStore.markRead(n.id)}>
-                        <span className="dot" />
-                        <span className="flex-1"><b className="block text-[13px]">{n.title}</b><small className="cx-meta">{n.kind} · {toVNTime(n.at, true)}</small></span>
-                      </div>
-                    ))}
+                    {notis.length === 0 ? (
+                      <p className="py-4 text-center text-xs text-muted">Không có thông báo mới.</p>
+                    ) : (
+                      notis.slice(0, 4).map((n) => (
+                        <div key={n.id} className={`cx-noti ${n.isRead ? "read" : ""}`} onClick={() => void handleMarkRead(n.id)}>
+                          <span className="dot" />
+                          <span className="flex-1">
+                            <b className="block text-[13px]">{n.title}</b>
+                            <small className="cx-meta">{notificationKind(n.type)} · {toVNTime(n.createdAt, true)}</small>
+                          </span>
+                        </div>
+                      ))
+                    )}
                     <Link to="/profile#notifications" className="cx-btn ghost !mt-2 !h-10 w-full" onClick={() => setBell(false)}>Xem tất cả thông báo</Link>
                   </motion.div>
                 )}

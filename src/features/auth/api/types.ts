@@ -3,8 +3,12 @@
 export type Role = "ADMIN" | "QUAN_LY" | "KY_THUAT" | "SALE" | "CUSTOMER" | "UNKNOWN";
 export type AccountType = "CUSTOMER" | "STAFF" | "ADMIN";
 
-/** User FE — fullName fallback username cho tới khi có User Service. */
-export type User = { sub: string; fullName: string; role: Role; buildings?: string[] };
+/**
+ * User FE — fullName fallback username cho tới khi có User Service.
+ * `id` là accountId từ MeResponse/LoginAccountInfo; backend dùng chính nó làm customerId
+ * (JWT `sub`), nên so sánh được với `ContractTenant.customerId`.
+ */
+export type User = { id: number; sub: string; fullName: string; role: Role; buildings?: string[] };
 
 export type LoginAccountInfo = {
   id: number;
