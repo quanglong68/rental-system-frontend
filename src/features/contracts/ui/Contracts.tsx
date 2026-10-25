@@ -1,231 +1,647 @@
-import { useState } from "react";
-import { segments, splitDaily } from "@/shared/lib/split";
-import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, useToast, vnd, type Tone } from "@/shared/ui";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/features/auth";
+import { ApiError } from "@/shared/api/httpClient";
+import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, todayVN, toVNTime, useToast, vnd, type Tone } from "@/shared/ui";
+import {
+  contractsApi,
+  type Contract,
+  type ContractDetail,
+  type ContractStatus,
+  type ContractTenant,
+  type MoveOutRequest,
+  type MoveOutStatus,
+} from "@/features/contracts/api/contractsApi";
 
-type Status = "Nháp" | "Chờ ký" | "Hiệu lực" | "Sắp hết hạn" | "Đã thanh lý";
-type Occupant = { name: string; phone: string; from: string; to?: string; rep?: boolean };
-type Contract = { id: string; tenant: string; room: string; capacity: number; rent: number; deposit: number; start: string; end: string; status: Status; occupants: Occupant[]; moveOut?: { name: string; date: string; reason: string } };
+const statusLabel: Record<ContractStatus, string> = {
+  DRAFT: "Nháp",
+  ACTIVE: "Hiệu lực",
+  TERMINATED: "Đã chấm dứt",
+  ENDED: "Đã kết thúc",
+};
+const statusTone: Record<ContractStatus, Tone> = { DRAFT: "violet", ACTIVE: "teal", TERMINATED: "coral", ENDED: "slate" };
+const moveOutLabel: Record<MoveOutStatus, string> = { PENDING: "Chờ duyệt", APPROVED: "Đã duyệt", REJECTED: "Từ chối", COMPLETED: "Hoàn tất" };
+const moveOutTone: Record<MoveOutStatus, Tone> = { PENDING: "amber", APPROVED: "teal", REJECTED: "coral", COMPLETED: "slate" };
 
-const seed: Contract[] = [
-  { id: "HĐ-0431", tenant: "Hoàng Thị Mai", room: "A.402 · Fern House", capacity: 3, rent: 4200000, deposit: 8400000, start: "2026-01-01T00:00:00Z", end: "2026-12-31T00:00:00Z", status: "Hiệu lực",
-    occupants: [{ name: "Hoàng Thị Mai", phone: "0903218447", from: "2026-01-01T00:00:00Z", rep: true }, { name: "Đỗ Minh Khoa", phone: "0938112045", from: "2026-10-10T00:00:00Z" }],
-    moveOut: { name: "Đỗ Minh Khoa", date: "2026-11-30T00:00:00Z", reason: "Chuyển công tác ra Hà Nội" } },
-  { id: "HĐ-0428", tenant: "Nguyễn Lam", room: "B.305 · Fern House", capacity: 2, rent: 3800000, deposit: 7600000, start: "2026-10-05T00:00:00Z", end: "2027-10-04T00:00:00Z", status: "Chờ ký", occupants: [{ name: "Nguyễn Lam", phone: "0907665120", from: "2026-10-05T00:00:00Z", rep: true }] },
-  { id: "HĐ-0399", tenant: "Trịnh Gia Huy", room: "C.201 · Mộc Residence", capacity: 3, rent: 5100000, deposit: 10200000, start: "2025-11-01T00:00:00Z", end: "2026-10-31T00:00:00Z", status: "Sắp hết hạn",
-    occupants: [{ name: "Trịnh Gia Huy", phone: "0912004771", from: "2025-11-01T00:00:00Z", rep: true }, { name: "Lê Bảo Trâm", phone: "0988120334", from: "2025-11-01T00:00:00Z" }, { name: "Vũ Anh Tú", phone: "0977431209", from: "2026-03-15T00:00:00Z", to: "2026-10-18T00:00:00Z" }] },
-  { id: "HĐ-0377", tenant: "Lý Khánh Vy", room: "A.108 · An Nhiên", capacity: 1, rent: 3500000, deposit: 7000000, start: "2025-06-01T00:00:00Z", end: "2026-05-31T00:00:00Z", status: "Đã thanh lý", occupants: [{ name: "Lý Khánh Vy", phone: "0901223344", from: "2025-06-01T00:00:00Z", to: "2026-05-31T00:00:00Z", rep: true }] },
+const TABS: { label: string; status?: ContractStatus }[] = [
+  { label: "Tất cả" },
+  { label: "Nháp", status: "DRAFT" },
+  { label: "Hiệu lực", status: "ACTIVE" },
+  { label: "Đã chấm dứt", status: "TERMINATED" },
+  { label: "Đã kết thúc", status: "ENDED" },
 ];
-const tones: Record<Status, Tone> = { "Nháp": "violet", "Chờ ký": "sky", "Hiệu lực": "teal", "Sắp hết hạn": "amber", "Đã thanh lý": "slate" };
 
-/** Kỳ tháng 10/2026 — số ngày ở của từng người trong kỳ */
-const PERIOD = { start: Date.UTC(2026, 9, 1), end: Date.UTC(2026, 9, 31), days: 31 };
-const DAY = 86400000;
-function daysIn(o: Occupant) {
-  const a = Math.max(PERIOD.start, Date.parse(o.from));
-  const b = Math.min(PERIOD.end, o.to ? Date.parse(o.to) : PERIOD.end);
-  return b < a ? 0 : Math.round((b - a) / DAY) + 1;
-}
-const bill = (rent: number) => [["Tiền phòng", rent], ["Điện · 182 kWh", 637000], ["Nước · 10 m³", 180000], ["Gửi xe · 2 xe", 200000], ["Internet & vệ sinh", 150000]] as [string, number][];
+/** Backend trả LocalDate (yyyy-mm-dd); hiển thị nguyên ngày, không đổi múi giờ. */
+const fmtDate = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
+const plusYear = (iso: string | null) => {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+};
+const errText = (e: unknown) => (e instanceof ApiError ? `${e.code} · ${e.message}` : e instanceof Error ? e.message : "Đã xảy ra lỗi.");
 
-const dayOf = (iso: string) => Math.round((Date.parse(iso) - PERIOD.start) / DAY) + 1;
+/** Yêu cầu dọn đi đang chờ duyệt: null = chưa tải xong/không tải được (không phải "0 yêu cầu"). */
+type PendingMoveOuts = { items: MoveOutRequest[]; total: number; complete: boolean } | { error: string };
 
-function SplitBilling({ c }: { c: Contract }) {
-  const lines = bill(c.rent);
-  const total = lines.reduce((s, [, v]) => s + v, 0);
-  const rows = c.occupants.filter((o) => daysIn(o) > 0).map((o) => ({ o, from: Math.max(1, dayOf(o.from)), to: o.to ? Math.min(PERIOD.days, dayOf(o.to)) : PERIOD.days }));
-  const { shares, headcount, daily } = splitDaily(total, PERIOD.days, rows.map((r) => [r.from, r.to]));
-  return (
-    <>
-      <div className="alert alert-info mb-4"><Icon name="split" size={18} /><div>Mỗi ngày, chi phí ngày ({vnd(total)} ÷ {PERIOD.days} ≈ <b>{vnd(daily)}</b>) được chia đều cho số người có mặt hôm đó, rồi cộng dồn thành hóa đơn cá nhân. Làm tròn đến nghìn đồng.</div></div>
-      <div className="kv mb-4">{lines.map(([k, v]) => <div key={k}><span>{k}</span><b>{vnd(v)}</b></div>)}<div className="!bg-[#f3f8f5]"><span>Tổng kỳ 10/2026</span><b>{vnd(total)}</b></div></div>
-      <div className="mb-5 rounded-xl border border-line p-3.5">
-        <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted">Số người có mặt theo ngày</div>
-        <div className="flex h-10 items-end gap-[2px]">{headcount.map((n, i) => <div key={i} title={`Ngày ${i + 1}: ${n} người`} className="flex-1 rounded-sm bg-teal" style={{ height: `${(n / Math.max(...headcount, 1)) * 100}%`, opacity: 0.35 + (n / Math.max(...headcount, 1)) * 0.65 }} />)}</div>
-        <div className="mt-2 space-y-0.5 text-[11.5px] text-muted">{segments(headcount).map((g) => <div key={g.from}>Ngày {g.from}–{g.to}: {g.n} người → {g.n ? vnd(daily / g.n) : "—"}/người/ngày</div>)}</div>
-      </div>
-      <div className="space-y-3">
-        {rows.map(({ o, from, to }, i) => (
-          <div key={o.name} className="rounded-xl border border-line p-3.5">
-            <div className="flex items-center justify-between gap-3 text-sm"><b>{o.name}{o.rep && <span className="ml-2"><Pill tone="teal">Đại diện</Pill></span>}</b><b>{vnd(shares[i])}</b></div>
-            <div className="relative mt-2.5 h-2.5 rounded-full bg-[#e6eeea]"><div className="absolute h-full rounded-full bg-teal" style={{ left: `${((from - 1) / PERIOD.days) * 100}%`, width: `${((to - from + 1) / PERIOD.days) * 100}%` }} /></div>
-            <div className="mt-1.5 text-[11px] text-muted">Có mặt ngày {from}–{to} ({to - from + 1}/{PERIOD.days} ngày) · {Math.round((shares[i] / total) * 1000) / 10}% tổng hóa đơn</div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
+/** Thông báo dùng chung cho stat và drawer, để hai nơi không lệch nhau. */
+type MoveOutsNotice =
+  | { kind: "error"; message: "Không tải được"; detail: string }
+  | { kind: "partial"; message: "Chỉ tải được một phần danh sách" }
+  | null;
 
-const contractServices = [
-  { k: "Gửi xe máy", price: 100000, unit: "xe", qty: 2, scope: "Cá nhân" },
-  { k: "Internet", price: 100000, unit: "phòng", qty: 1, scope: "Dùng chung" },
-  { k: "Vệ sinh", price: 50000, unit: "người", qty: 2, scope: "Dùng chung" },
-];
-function Services({ toast }: { toast: (m: string) => void }) {
-  const [list, setList] = useState(contractServices);
-  return (
-    <>
-      <div className="divide-y divide-line rounded-xl border border-line">
-        {list.map((x, i) => (
-          <div key={x.k} className="flex flex-wrap items-center gap-3 p-3.5">
-            <div className="flex-1"><b className="text-sm">{x.k}</b> <Pill tone={x.scope === "Cá nhân" ? "violet" : "sky"}>{x.scope}</Pill><div className="text-xs text-muted">{vnd(x.price)} / {x.unit}</div></div>
-            <div className="flex items-center gap-1"><button className="icon-button !h-8 !w-8" onClick={() => setList(list.map((y, j) => (j === i ? { ...y, qty: Math.max(0, y.qty - 1) } : y)))}>−</button><b className="w-6 text-center text-sm">{x.qty}</b><button className="icon-button !h-8 !w-8" onClick={() => setList(list.map((y, j) => (j === i ? { ...y, qty: y.qty + 1 } : y)))}>+</button></div>
-            <b className="w-24 text-right text-sm">{vnd(x.price * x.qty)}</b>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center justify-between"><button className="text-button !text-xs" onClick={() => setList([...list, { k: "Gửi ô tô", price: 1200000, unit: "xe", qty: 1, scope: "Cá nhân" }])}><Icon name="plus" size={13} /> Đăng ký thêm dịch vụ</button><button className="primary-button !h-9" onClick={() => toast("Dịch vụ áp dụng từ kỳ hóa đơn kế tiếp")}>Lưu</button></div>
-    </>
-  );
+const MOVE_OUT_PAGE_SIZE = 50;
+const MOVE_OUT_MAX_PAGES = 20;
+
+/** Tải mọi trang PENDING cần thiết; `total` lấy từ totalElements nên luôn chính xác. */
+async function fetchPendingMoveOuts(): Promise<PendingMoveOuts> {
+  try {
+    const first = await contractsApi.moveOuts({ status: "PENDING", page: 0, size: MOVE_OUT_PAGE_SIZE });
+    const items = [...first.content];
+    const total = first.totalElements;
+    const maxPages = Math.min(first.totalPages, MOVE_OUT_MAX_PAGES);
+    for (let next = 1; next < maxPages && items.length < total; next += 1) {
+      const page = await contractsApi.moveOuts({ status: "PENDING", page: next, size: MOVE_OUT_PAGE_SIZE });
+      if (page.content.length === 0) break;
+      items.push(...page.content);
+    }
+    return { items, total, complete: items.length >= total };
+  } catch (e) {
+    return { error: errText(e) };
+  }
 }
 
-function Detail({ c, onChange, toast }: { c: Contract; onChange: (c: Contract) => void; toast: (m: string) => void }) {
-  const [tab, setTab] = useState("Thông tin");
+/** Ngày chấm dứt hợp lệ trong khoảng [startDate, endDate]; endDate null = không giới hạn trên. */
+function terminationBounds(c: Contract) {
+  const min = c.startDate;
+  const max = c.endDate ?? "";
+  const clamp = (d: string) => (!d ? d : d < min ? min : max && d > max ? max : d);
+  const valid = (d: string) => !!d && d >= min && (!max || d <= max);
+  return { min, max: max || undefined, clamp, valid };
+}
+
+/**
+ * Mutation và refresh tách rời: mutation lỗi → báo lỗi; mutation xong mà refresh lỗi
+ * → vẫn báo thành công, kèm cảnh báo dữ liệu chưa tải lại được.
+ */
+async function runMutation(
+  fn: () => Promise<unknown>,
+  refresh: () => Promise<boolean>,
+  onSuccess: (reloadFailed: boolean) => void,
+  onError: (message: string) => void,
+): Promise<boolean> {
+  try {
+    await fn();
+  } catch (e) {
+    onError(errText(e));
+    return false;
+  }
+  const reloaded = await refresh();
+  onSuccess(!reloaded);
+  return true;
+}
+
+function StatusPill({ status }: { status: ContractStatus }) {
+  return <Pill tone={statusTone[status]}>{statusLabel[status]}</Pill>;
+}
+
+function Occupants({
+  contract,
+  canWrite,
+  refresh,
+  notify,
+  toast,
+}: {
+  contract: ContractDetail;
+  canWrite: boolean;
+  refresh: () => Promise<boolean>;
+  notify: (message: string, reloadFailed: boolean) => void;
+  toast: (m: string) => void;
+}) {
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", from: "2026-10-15" });
+  // joinedAt phải >= startDate của hợp đồng (backend chặn), nên mặc định lấy mốc muộn hơn.
+  const defaultJoinedAt = contract.startDate > todayVN() ? contract.startDate : todayVN();
+  const [form, setForm] = useState({ customerId: "", joinedAt: defaultJoinedAt });
+  const [leaving, setLeaving] = useState<{ tenantId: number; leftAt: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const active = c.occupants.filter((o) => !o.to || Date.parse(o.to) >= Date.now());
-  const addOccupant = () => {
-    if (!form.name || !/^(0|\+84)(3|5|7|8|9)\d{8}$/.test(form.phone)) return setError("Nhập họ tên và số điện thoại hợp lệ.");
-    if (active.length >= c.capacity) return setError("ROOM_CAPACITY_EXCEEDED");
-    onChange({ ...c, occupants: [...c.occupants, { name: form.name, phone: form.phone, from: `${form.from}T00:00:00Z` }] });
-    setAdding(false); setError(""); setForm({ name: "", phone: "", from: "2026-10-15" }); toast("Đã thêm người ở");
+
+  const active = contract.tenants.filter((t) => !t.leftAt);
+
+  const add = async () => {
+    const customerId = Number(form.customerId);
+    if (!Number.isInteger(customerId) || customerId <= 0) return setError("Nhập customerId (số) của khách thuê.");
+    if (!form.joinedAt) return setError("Chọn ngày vào ở.");
+    setBusy(true);
+    setError("");
+    await runMutation(
+      () => contractsApi.addTenant(contract.id, customerId, form.joinedAt),
+      refresh,
+      (reloadFailed) => {
+        setAdding(false);
+        setForm({ customerId: "", joinedAt: defaultJoinedAt });
+        toast("Đã thêm người ở");
+        notify("Đã thêm người ở", reloadFailed);
+      },
+      setError,
+    );
+    setBusy(false);
   };
+
+  const leave = async () => {
+    if (!leaving) return;
+    setBusy(true);
+    setError("");
+    await runMutation(
+      () => contractsApi.leaveTenant(contract.id, leaving.tenantId, leaving.leftAt),
+      refresh,
+      (reloadFailed) => {
+        setLeaving(null);
+        toast("Đã ghi nhận ngày rời đi");
+        notify("Đã ghi nhận ngày rời đi", reloadFailed);
+      },
+      setError,
+    );
+    setBusy(false);
+  };
+
+  const setRep = async (t: ContractTenant) => {
+    setBusy(true);
+    setError("");
+    await runMutation(
+      () => contractsApi.setRepresentative(contract.id, t.id),
+      refresh,
+      (reloadFailed) => {
+        toast("Đã đổi người đại diện");
+        notify("Đã đổi người đại diện", reloadFailed);
+      },
+      setError,
+    );
+    setBusy(false);
+  };
+
   return (
     <>
-      <div className="mb-5"><Tabs items={["Thông tin", "Người ở", "Dịch vụ", "Chia hóa đơn"]} value={tab} onChange={setTab} /></div>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-sm text-muted">{active.length} người đang ở · {contract.tenants.length} người trong hợp đồng</span>
+        {canWrite && contract.status === "ACTIVE" && (
+          <button className="text-button !text-xs" onClick={() => { setAdding(!adding); setError(""); }}>
+            <Icon name="plus" size={14} /> Thêm người ở
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="mb-4 rounded-xl border border-line bg-[#fafbf9] p-4">
+          <div className="form-grid">
+            <Field label="Mã khách thuê (customerId)" hint="Backend chỉ nhận ID, tên khách do dịch vụ người dùng trả">
+              <input inputMode="numeric" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} />
+            </Field>
+            <Field label="Ngày vào ở"><input type="date" value={form.joinedAt} min={contract.startDate} onChange={(e) => setForm({ ...form, joinedAt: e.target.value })} /></Field>
+          </div>
+          {error && <div className="alert alert-error mt-3"><Icon name="shield" size={18} /><div>{error}</div></div>}
+          <div className="mt-3 flex justify-end gap-2">
+            <button className="secondary-button !h-9" onClick={() => { setAdding(false); setError(""); }}>Hủy</button>
+            <button className="primary-button !h-9" disabled={busy} onClick={add}>Thêm</button>
+          </div>
+        </div>
+      )}
+      {!adding && error && <div className="alert alert-error mb-3"><Icon name="shield" size={18} /><div>{error}</div></div>}
+      <div className="divide-y divide-line rounded-xl border border-line">
+        {contract.tenants.length === 0 && <div className="p-4 text-sm text-muted">Hợp đồng chưa có người ở.</div>}
+        {contract.tenants.map((t) => (
+          <div key={t.id} className="flex flex-wrap items-center gap-3 p-3.5">
+            <span className="avatar-chip !h-9 !w-9">{String(t.customerId).slice(-2)}</span>
+            <div className="min-w-0 flex-1">
+              <b className="text-sm">Khách #{t.customerId}</b>{" "}
+              {t.isRepresentative && <Pill tone="teal">Đại diện phòng</Pill>} {t.leftAt && <Pill tone="slate">Đã rời</Pill>}
+              <div className="sub text-xs text-muted">Vào {fmtDate(t.joinedAt)}{t.leftAt && ` · Rời ${fmtDate(t.leftAt)}`}</div>
+            </div>
+            {canWrite && !t.leftAt && !t.isRepresentative && contract.status === "ACTIVE" && (
+              <>
+                <button className="text-button" disabled={busy} onClick={() => setRep(t)}>Đặt làm đại diện</button>
+                <button className="text-button !text-[#a63e28]" onClick={() => { setLeaving({ tenantId: t.id, leftAt: todayVN() }); setError(""); }}>Ghi nhận rời đi</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {leaving && (
+        <div className="mt-3 rounded-xl border border-line bg-[#fafbf9] p-4">
+          <Field label="Ngày rời đi"><input type="date" value={leaving.leftAt} onChange={(e) => setLeaving({ ...leaving, leftAt: e.target.value })} /></Field>
+          <div className="mt-3 flex justify-end gap-2">
+            <button className="secondary-button !h-9" onClick={() => setLeaving(null)}>Hủy</button>
+            <button className="primary-button !h-9" disabled={busy || !leaving.leftAt} onClick={leave}>Xác nhận</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Detail({
+  contract,
+  loading,
+  error,
+  refresh,
+  moveOut,
+  moveOutsNotice,
+  canWrite,
+  notify,
+  toast,
+}: {
+  contract: ContractDetail | null;
+  loading: boolean;
+  error: string;
+  refresh: () => Promise<boolean>;
+  moveOut: MoveOutRequest | null;
+  moveOutsNotice: MoveOutsNotice;
+  canWrite: boolean;
+  notify: (message: string, reloadFailed: boolean) => void;
+  toast: (m: string) => void;
+}) {
+  const [tab, setTab] = useState("Thông tin");
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  if (loading) return <div className="py-10 text-center text-sm text-muted">Đang tải chi tiết…</div>;
+  if (error) return <div className="alert alert-error"><Icon name="shield" size={18} /><div>{error}</div></div>;
+  if (!contract) return null;
+
+  const act = async (fn: () => Promise<unknown>, msg: string) => {
+    setBusy(true);
+    setActionError("");
+    await runMutation(fn, refresh, (reloadFailed) => { toast(msg); notify(msg, reloadFailed); }, setActionError);
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <div className="mb-5"><Tabs items={["Thông tin", "Người ở"]} value={tab} onChange={setTab} /></div>
+      {actionError && <div className="alert alert-error mb-4"><Icon name="shield" size={18} /><div>{actionError}</div></div>}
       {tab === "Thông tin" && (
         <>
           <div className="kv">
-            <div><span>Khách đứng tên</span><b>{c.tenant}</b></div><div><span>Phòng</span><b>{c.room}</b></div>
-            <div><span>Giá thuê chốt</span><b>{vnd(c.rent)}</b></div><div><span>Tiền cọc</span><b>{vnd(c.deposit)}</b></div>
-            <div><span>Bắt đầu</span><b>{toVNTime(c.start)}</b></div><div><span>Kết thúc</span><b>{toVNTime(c.end)}</b></div>
-            <div><span>Sức chứa tối đa</span><b>{c.capacity} người</b></div><div><span>Đang ở</span><b>{active.length} người</b></div>
+            <div><span>Mã hợp đồng</span><b>#{contract.id}</b></div>
+            <div><span>Yêu cầu thuê</span><b>{contract.rentalRequestId ? `#${contract.rentalRequestId}` : "—"}</b></div>
+            <div><span>Mã khách đứng tên</span><b>#{contract.customerId}</b></div>
+            <div><span>Phòng</span><b>#{contract.roomId}</b></div>
+            <div><span>Tòa nhà</span><b>#{contract.buildingId}</b></div>
+            <div><span>Giá thuê</span><b>{contract.rentAmount == null ? "—" : vnd(contract.rentAmount)}</b></div>
+            <div><span>Tiền cọc</span><b>{contract.depositAmount == null ? "—" : vnd(contract.depositAmount)}</b></div>
+            <div><span>Trạng thái</span><b><StatusPill status={contract.status} /></b></div>
+            <div><span>Bắt đầu</span><b>{fmtDate(contract.startDate)}</b></div>
+            <div><span>Kết thúc</span><b>{fmtDate(contract.endDate)}</b></div>
+            <div><span>Tạo lúc</span><b>{toVNTime(contract.createdAt, true)}</b></div>
+            {contract.terminationReason && <div className="span-2"><span>Lý do chấm dứt</span><b>{contract.terminationReason}</b></div>}
           </div>
-          {c.status === "Nháp" && <div className="alert alert-info mt-4"><Icon name="contract" size={18} />Hợp đồng nháp: có thể chỉnh giá trước khi gửi ký. Sau khi ký, giá thuê được cố định suốt thời hạn.</div>}
-          {c.moveOut && (
+          {contract.status === "DRAFT" && (
+            <div className="alert alert-info mt-4"><Icon name="contract" size={18} />Hợp đồng nháp — chỉnh giá qua luồng chốt giá của quản lý trước khi ký. Sau khi ký, giá thuê được cố định suốt thời hạn.</div>
+          )}
+          {moveOutsNotice?.kind === "error" && (
+            <div className="alert alert-error mt-4"><Icon name="shield" size={18} /><div><b>Không tải được</b> danh sách yêu cầu dọn đi ({moveOutsNotice.detail}). Trạng thái dọn đi của hợp đồng này chưa xác định.</div></div>
+          )}
+          {moveOutsNotice?.kind === "partial" && (
+            <div className="alert alert-info mt-4"><Icon name="shield" size={18} /><div><b>Chỉ tải được một phần danh sách</b> yêu cầu dọn đi, nên trạng thái dọn đi của hợp đồng này có thể chưa chính xác.</div></div>
+          )}
+          {moveOut && (
             <>
               <div className="section-title">Yêu cầu dọn đi</div>
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
-                <b>{c.moveOut.name}</b> muốn dọn đi ngày <b>{toVNTime(c.moveOut.date)}</b><p className="mt-1 text-muted">“{c.moveOut.reason}”</p>
-                <div className="mt-3 flex gap-2">
-                  <button className="primary-button !h-9" onClick={() => { onChange({ ...c, moveOut: undefined, occupants: c.occupants.map((o) => o.name === c.moveOut!.name ? { ...o, to: c.moveOut!.date } : o) }); toast("Đã duyệt yêu cầu dọn đi"); }}>Duyệt</button>
-                  <button className="secondary-button !h-9" onClick={() => { onChange({ ...c, moveOut: undefined }); toast("Đã từ chối yêu cầu"); }}>Từ chối</button>
+                <div className="flex items-center justify-between gap-3">
+                  <b>Khách #{moveOut.requestedBy} muốn dọn đi ngày {fmtDate(moveOut.expectedMoveOutDate)}</b>
+                  <Pill tone={moveOutTone[moveOut.status]}>{moveOutLabel[moveOut.status]}</Pill>
                 </div>
+                {moveOut.reason && <p className="mt-1 text-muted">“{moveOut.reason}”</p>}
+                {canWrite && moveOut.status === "PENDING" && (
+                  <>
+                    {rejecting ? (
+                      <div className="mt-3">
+                        <Field label="Lý do từ chối"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ví dụ: chưa bàn giao phòng" /></Field>
+                        <div className="mt-2 flex gap-2">
+                          <button className="secondary-button !h-9" onClick={() => setRejecting(false)}>Hủy</button>
+                          <button
+                            className="danger-button !h-9"
+                            disabled={busy || !reason.trim()}
+                            onClick={() => act(() => contractsApi.rejectMoveOut(moveOut.id, reason.trim()), "Đã từ chối yêu cầu dọn đi")}
+                          >
+                            Xác nhận từ chối
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex gap-2">
+                        <button className="primary-button !h-9" disabled={busy} onClick={() => act(() => contractsApi.approveMoveOut(moveOut.id), "Đã duyệt yêu cầu dọn đi")}>Duyệt</button>
+                        <button className="secondary-button !h-9" disabled={busy} onClick={() => setRejecting(true)}>Từ chối</button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </>
           )}
         </>
       )}
-      {tab === "Người ở" && (
-        <>
-          <div className="mb-3 flex items-center justify-between"><span className="text-sm text-muted">{active.length}/{c.capacity} chỗ đã dùng</span><button className="text-button !text-xs" onClick={() => setAdding(!adding)}><Icon name="plus" size={14} /> Thêm người ở</button></div>
-          {adding && (
-            <div className="mb-4 rounded-xl border border-line bg-[#fafbf9] p-4">
-              <div className="form-grid">
-                <Field label="Họ tên"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-                <Field label="Số điện thoại"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="09xxxxxxxx" /></Field>
-                <Field label="Ngày vào ở" hint="Dùng để chia hóa đơn theo ngày"><input type="date" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} /></Field>
-              </div>
-              {error === "ROOM_CAPACITY_EXCEEDED" ? (
-                <div className="alert alert-error mt-3"><Icon name="shield" size={18} /><div><code>422 · ROOM_CAPACITY_EXCEEDED</code><br />Phòng đã đủ {c.capacity} người. Cần một người rời đi trước khi thêm người mới.</div></div>
-              ) : error && <div className="field-error mt-3">{error}</div>}
-              <div className="mt-3 flex justify-end gap-2"><button className="secondary-button !h-9" onClick={() => { setAdding(false); setError(""); }}>Hủy</button><button className="primary-button !h-9" onClick={addOccupant}>Thêm</button></div>
-            </div>
-          )}
-          <div className="divide-y divide-line rounded-xl border border-line">
-            {c.occupants.map((o) => (
-              <div key={o.name} className="flex flex-wrap items-center gap-3 p-3.5">
-                <span className="avatar-chip !h-9 !w-9">{o.name.split(" ").pop()![0]}</span>
-                <div className="min-w-0 flex-1"><b className="text-sm">{o.name}</b> {o.rep && <Pill tone="teal">Đại diện phòng</Pill>}<div className="sub text-xs text-muted">{o.phone} · Vào {toVNTime(o.from)}{o.to && ` · Rời ${toVNTime(o.to)}`}</div></div>
-                {!o.to && !o.rep && <button className="text-button" onClick={() => { onChange({ ...c, occupants: c.occupants.map((x) => ({ ...x, rep: x.name === o.name })) }); toast(`${o.name} là đại diện phòng mới`); }}>Đặt làm đại diện</button>}
-                {!o.to && !o.rep && <button className="text-button !text-[#a63e28]" onClick={() => { onChange({ ...c, occupants: c.occupants.map((x) => x.name === o.name ? { ...x, to: new Date().toISOString() } : x) }); toast("Đã ghi nhận ngày rời đi"); }}>Ghi nhận rời đi</button>}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-      {tab === "Dịch vụ" && <Services toast={toast} />}
-      {tab === "Chia hóa đơn" && <SplitBilling c={c} />}
+      {tab === "Người ở" && <Occupants contract={contract} canWrite={canWrite} refresh={refresh} notify={notify} toast={toast} />}
     </>
   );
 }
 
 export default function Contracts() {
-  const [rows, setRows] = useState(seed);
+  const { user } = useAuth();
+  const canWrite = user?.role === "QUAN_LY" || user?.role === "ADMIN";
   const [tab, setTab] = useState("Tất cả");
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState<Contract[]>([]);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [pendingMoveOuts, setPendingMoveOuts] = useState<PendingMoveOuts | null>(null);
+  const [counts, setCounts] = useState<{ active: number | null; draft: number | null } | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<ContractDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [confirm, setConfirm] = useState<"renew" | "terminate" | null>(null);
+  const [form, setForm] = useState({ newEndDate: "", terminationDate: todayVN(), reason: "" });
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [reloadWarning, setReloadWarning] = useState("");
   const [toast, show] = useToast();
-  const list = tab === "Tất cả" ? rows : rows.filter((r) => r.status === tab);
-  const open = rows.find((r) => r.id === openId);
-  const update = (c: Contract) => setRows(rows.map((r) => (r.id === c.id ? c : r)));
-  const setStatus = (s: Status, msg: string) => { if (open) { update({ ...open, status: s }); show(msg); } };
+
+  const status = TABS.find((t) => t.label === tab)?.status;
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await contractsApi.list({ status, page, size: 20 });
+      setRows(res.content);
+      setTotalPages(res.totalPages);
+      setTotalElements(res.totalElements);
+      return true;
+    } catch (e) {
+      setRows([]);
+      setTotalPages(0);
+      setTotalElements(0);
+      setError(errText(e));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [status, page]);
+
+  const loadSide = useCallback(async () => {
+    let ok = true;
+    try {
+      const [active, draft] = await Promise.all([
+        contractsApi.list({ status: "ACTIVE", page: 0, size: 1 }),
+        contractsApi.list({ status: "DRAFT", page: 0, size: 1 }),
+      ]);
+      setCounts({ active: active.totalElements, draft: draft.totalElements });
+    } catch {
+      setCounts(null);
+      ok = false;
+    }
+    // GET /move-out-requests chỉ cho QUAN_LY/ADMIN — SALE không gọi để tránh 403.
+    if (!canWrite) {
+      setPendingMoveOuts({ items: [], total: 0, complete: true });
+      return ok;
+    }
+    const result = await fetchPendingMoveOuts();
+    setPendingMoveOuts(result);
+    return ok && !("error" in result);
+  }, [canWrite]);
+
+  const loadDetail = useCallback(async (id: number, keepOnError = false) => {
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      setDetail(await contractsApi.detail(id));
+      return true;
+    } catch (e) {
+      // Khi refresh sau mutation: giữ chi tiết cũ, chỉ cảnh báo chưa tải lại được.
+      if (!keepOnError) {
+        setDetail(null);
+        setDetailError(errText(e));
+      }
+      return false;
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadList(); }, [loadList]);
+  useEffect(() => { void loadSide(); }, [loadSide]);
+  useEffect(() => { if (openId != null) void loadDetail(openId); }, [openId, loadDetail]);
+
+  /** Trả về true nếu mọi phần tải lại thành công — dùng để tách lỗi mutation khỏi lỗi refresh. */
+  const refresh = useCallback(async () => {
+    const results = await Promise.all([loadList(), loadSide()]);
+    if (openId != null) results.push(await loadDetail(openId, true));
+    return results.every(Boolean);
+  }, [loadList, loadSide, loadDetail, openId]);
+
+  const notify = (message: string, reloadFailed: boolean) => {
+    if (reloadFailed) setReloadWarning(`${message}, nhưng dữ liệu chưa tải lại được. Đóng và mở lại, hoặc dùng "Thử lại" để xem trạng thái mới.`);
+    else setReloadWarning("");
+  };
+
+  const closeDrawer = () => { setOpenId(null); setDetail(null); setConfirm(null); setActionError(""); setReloadWarning(""); };
+
+  const openDetail = (c: Contract) => {
+    const bounds = terminationBounds(c);
+    setConfirm(null);
+    setActionError("");
+    setReloadWarning("");
+    setForm({ newEndDate: plusYear(c.endDate), terminationDate: bounds.clamp(todayVN()), reason: "" });
+    setOpenId(c.id);
+  };
+
+  const runAction = async (fn: () => Promise<unknown>, msg: string) => {
+    setBusy(true);
+    setActionError("");
+    const ok = await runMutation(fn, refresh, (reloadFailed) => { setConfirm(null); show(msg); notify(msg, reloadFailed); }, setActionError);
+    if (ok) setConfirm(null);
+    setBusy(false);
+  };
+
+  const pending = useMemo(() => {
+    if (!pendingMoveOuts || "error" in pendingMoveOuts) return null;
+    const byContract = new Map<number, MoveOutRequest>();
+    for (const m of pendingMoveOuts.items) if (!byContract.has(m.contractId)) byContract.set(m.contractId, m);
+    return byContract;
+  }, [pendingMoveOuts]);
+
+  /** Lỗi tải hoàn toàn khác với chỉ tải được một phần (chạm giới hạn số trang). */
+  const moveOutsNotice: MoveOutsNotice = !pendingMoveOuts
+    ? null
+    : "error" in pendingMoveOuts
+      ? { kind: "error", message: "Không tải được", detail: pendingMoveOuts.error ?? "Lỗi không xác định" }
+      : pendingMoveOuts.complete
+        ? null
+        : { kind: "partial", message: "Chỉ tải được một phần danh sách" };
+  const currentMoveOut = detail && pending ? pending.get(detail.id) ?? null : null;
+
+  const bounds = detail ? terminationBounds(detail) : null;
+  const terminationDate = form.terminationDate;
+  const terminationValid = !!bounds && bounds.valid(terminationDate);
+
   return (
     <>
-      <PageHead eyebrow="Pháp lý" title="Hợp đồng thuê" desc="Tạo nháp, chốt giá, ký, gia hạn và thanh lý. Quản lý người ở và chia hóa đơn theo ngày. Giờ hiển thị theo UTC+7."
-        actions={<button className="primary-button" onClick={() => setCreating(true)}><Icon name="plus" size={16} /> Tạo hợp đồng</button>} />
+      <PageHead
+        eyebrow="Pháp lý"
+        title="Hợp đồng thuê"
+        desc="Theo dõi vòng đời hợp đồng: ký, gia hạn, chấm dứt, quản lý người ở và duyệt yêu cầu dọn đi. Ngày hiển thị theo dữ liệu backend (YYYY-MM-DD)."
+      />
       <section className="stats-grid mb-6">
-        <MiniStat label="Đang hiệu lực" value="118" note="Trên 4 tòa nhà" />
-        <MiniStat label="Chờ ký" value="6" note="3 gửi qua email hôm nay" tone="sky" />
-        <MiniStat label="Hết hạn trong 30 ngày" value="9" note="Cần liên hệ gia hạn" tone="amber" />
-        <MiniStat label="Yêu cầu dọn đi" value="2" note="Chờ quản lý duyệt" tone="coral" />
+        <MiniStat label="Đang hiệu lực" value={counts?.active != null ? String(counts.active) : "—"} note={counts ? "Hợp đồng ACTIVE" : "Không tải được"} />
+        <MiniStat label="Nháp" value={counts?.draft != null ? String(counts.draft) : "—"} note={counts ? "Chờ chốt giá & ký" : "Không tải được"} tone="sky" />
+        {canWrite && (
+          <MiniStat
+            label="Yêu cầu dọn đi"
+            value={pendingMoveOuts && !("error" in pendingMoveOuts) ? String(pendingMoveOuts.total) : "—"}
+            note={moveOutsNotice ? moveOutsNotice.message : pendingMoveOuts ? "Chờ quản lý duyệt" : "Đang tải…"}
+            tone={moveOutsNotice?.kind === "error" ? "coral" : "amber"}
+          />
+        )}
       </section>
       <article className="panel">
-        <Toolbar placeholder="Tìm số hợp đồng, khách thuê..."><Tabs items={["Tất cả", "Nháp", "Chờ ký", "Hiệu lực", "Sắp hết hạn", "Đã thanh lý"]} value={tab} onChange={setTab} /></Toolbar>
+        <div className="toolbar">
+          <Tabs items={TABS.map((t) => t.label)} value={tab} onChange={(v) => { setTab(v); setPage(0); }} />
+        </div>
         <div className="overflow-x-auto">
           <table className="data-table">
-            <thead><tr><th>Số HĐ</th><th>Khách thuê</th><th>Phòng</th><th>Thời hạn</th><th className="text-right">Giá thuê</th><th className="text-right">Cọc</th><th>Trạng thái</th><th></th></tr></thead>
+            <thead><tr><th>Mã HĐ</th><th>Khách thuê</th><th>Phòng · Tòa</th><th>Thời hạn</th><th className="text-right">Giá thuê</th><th className="text-right">Cọc</th><th>Trạng thái</th><th></th></tr></thead>
             <tbody>
-              {list.map((r) => (
-                <tr key={r.id} className="cursor-pointer" onClick={() => setOpenId(r.id)}>
-                  <td className="font-mono text-xs font-bold">{r.id}</td>
-                  <td><b>{r.tenant}</b><div className="sub">{r.occupants.filter((o) => !o.to).length}/{r.capacity} người ở{r.moveOut && " · có yêu cầu dọn đi"}</div></td>
-                  <td className="text-[13px]">{r.room}</td>
-                  <td className="whitespace-nowrap text-xs">{toVNTime(r.start)} → {toVNTime(r.end)}</td>
-                  <td className="text-right font-bold">{vnd(r.rent)}</td>
-                  <td className="text-right text-muted">{vnd(r.deposit)}</td>
-                  <td><Pill tone={tones[r.status]}>{r.status}</Pill></td>
-                  <td><button className="text-button">Chi tiết <Icon name="chevron" size={13} /></button></td>
-                </tr>
-              ))}
+              {loading && <tr><td colSpan={8} className="py-8 text-center text-sm text-muted">Đang tải hợp đồng…</td></tr>}
+              {!loading && error && (
+                <tr><td colSpan={8} className="py-6">
+                  <div className="alert alert-error"><Icon name="shield" size={18} /><div>{error}</div></div>
+                  <div className="mt-3 text-center"><button className="secondary-button !h-9" onClick={() => void loadList()}>Thử lại</button></div>
+                </td></tr>
+              )}
+              {!loading && !error && rows.length === 0 && (
+                <tr><td colSpan={8} className="py-10 text-center text-sm text-muted">Không có hợp đồng nào ở trạng thái này.</td></tr>
+              )}
+              {!loading && !error && rows.map((r) => {
+                const mo = pending?.get(r.id);
+                return (
+                  <tr key={r.id} className="cursor-pointer" onClick={() => openDetail(r)}>
+                    <td className="font-mono text-xs font-bold">#{r.id}</td>
+                    <td><b>Khách #{r.customerId}</b><div className="sub">{mo ? `Có yêu cầu dọn đi (${moveOutLabel[mo.status]})` : `Khách đứng tên #${r.customerId}`}</div></td>
+                    <td className="text-[13px]">#{r.roomId} · #{r.buildingId}</td>
+                    <td className="whitespace-nowrap text-xs">{fmtDate(r.startDate)} → {fmtDate(r.endDate)}</td>
+                    <td className="text-right font-bold">{r.rentAmount == null ? "—" : vnd(r.rentAmount)}</td>
+                    <td className="text-right text-muted">{r.depositAmount == null ? "—" : vnd(r.depositAmount)}</td>
+                    <td><StatusPill status={r.status} /></td>
+                    <td><button className="text-button">Chi tiết <Icon name="chevron" size={13} /></button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {!loading && !error && totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-line px-4 py-3 text-xs text-muted">
+            <span>Trang {page + 1}/{totalPages} · {totalElements} hợp đồng</span>
+            <div className="flex gap-2">
+              <button className="secondary-button !h-8" disabled={page === 0} onClick={() => setPage(page - 1)}>Trước</button>
+              <button className="secondary-button !h-8" disabled={page + 1 >= totalPages} onClick={() => setPage(page + 1)}>Sau</button>
+            </div>
+          </div>
+        )}
       </article>
 
-      <Drawer open={!!open} wide eyebrow={open?.room} title={`Hợp đồng ${open?.id ?? ""}`} onClose={() => { setOpenId(null); setConfirm(null); }}
-        footer={open && (confirm ? (
-          <>
-            <span className="mr-auto self-center text-sm">{confirm === "renew" ? "Gia hạn thêm 12 tháng, giữ nguyên giá?" : "Thanh lý sớm và hoàn cọc theo điều khoản?"}</span>
-            <button className="secondary-button" onClick={() => setConfirm(null)}>Hủy</button>
-            <button className={confirm === "renew" ? "primary-button" : "danger-button"} onClick={() => { if (confirm === "renew") { update({ ...open, status: "Hiệu lực", end: new Date(Date.parse(open.end) + 365 * DAY).toISOString() }); show("Đã gia hạn hợp đồng"); } else setStatus("Đã thanh lý", "Đã thanh lý hợp đồng"); setConfirm(null); }}>Xác nhận</button>
-          </>
-        ) : (
-          <>
-            {open.status === "Nháp" && <button className="primary-button" onClick={() => setStatus("Chờ ký", "Đã chốt giá và gửi ký")}>Chốt giá & gửi ký</button>}
-            {open.status === "Chờ ký" && <button className="primary-button" onClick={() => setStatus("Hiệu lực", "Hợp đồng đã được ký")}><Icon name="check" size={15} /> Xác nhận đã ký</button>}
-            {(open.status === "Hiệu lực" || open.status === "Sắp hết hạn") && <><button className="danger-button" onClick={() => setConfirm("terminate")}>Thanh lý sớm</button><button className="primary-button" onClick={() => setConfirm("renew")}>Gia hạn</button></>}
-            <button className="secondary-button"><Icon name="download" size={15} /> Xuất PDF</button>
-          </>
-        ))}>
-        {open && <Detail key={open.id} c={open} onChange={update} toast={show} />}
-      </Drawer>
-
-      <Drawer open={creating} eyebrow="Bước 1 · Nháp" title="Tạo hợp đồng mới" onClose={() => setCreating(false)}
-        footer={<><button className="secondary-button" onClick={() => setCreating(false)}>Hủy</button><button className="primary-button" onClick={() => { setRows([{ ...seed[1], id: "HĐ-0432", tenant: "Phan Ngọc Hân", status: "Nháp", occupants: [{ name: "Phan Ngọc Hân", phone: "0909876543", from: "2026-10-15T00:00:00Z", rep: true }] }, ...rows]); setCreating(false); show("Đã lưu hợp đồng nháp HĐ-0432"); }}>Lưu nháp</button></>}>
-        <div className="form-grid">
-          <Field label="Tòa nhà"><select><option>The Fern House</option><option>Mộc Residence</option><option>Căn hộ An Nhiên</option></select></Field>
-          <Field label="Phòng" hint="Chỉ phòng Trống / Sắp trống"><select><option>B.305 · tối đa 2 người</option><option>A.305 · tối đa 3 người</option></select></Field>
-          <Field label="Khách đứng tên" ><input defaultValue="Phan Ngọc Hân" /></Field>
-          <Field label="SĐT / Email"><input defaultValue="0909876543" /></Field>
-          <Field label="Ngày bắt đầu"><input type="date" defaultValue="2026-10-15" /></Field>
-          <Field label="Thời hạn"><select><option>12 tháng</option><option>6 tháng</option><option>24 tháng</option></select></Field>
-          <Field label="Giá thuê (₫/tháng)" hint="Có thể chỉnh đến khi chốt giá"><input defaultValue="3.800.000" /></Field>
-          <Field label="Tiền cọc"><input defaultValue="7.600.000" /></Field>
-          <div className="span-2"><Field label="Điều khoản bổ sung"><textarea placeholder="Ví dụ: miễn phí gửi 1 xe máy…" /></Field></div>
-        </div>
+      <Drawer
+        open={openId != null}
+        wide
+        eyebrow={detail ? `Phòng #${detail.roomId} · Tòa #${detail.buildingId}` : undefined}
+        title={`Hợp đồng #${openId ?? ""}`}
+        onClose={closeDrawer}
+        footer={detail && canWrite ? (
+          confirm ? (
+            <>
+              <div className="mr-auto self-center">
+                {confirm === "renew" ? (
+                  <Field label="Ngày kết thúc mới">
+                    <input type="date" value={form.newEndDate} onChange={(e) => setForm({ ...form, newEndDate: e.target.value })} />
+                  </Field>
+                ) : (
+                  <div className="form-grid">
+                    <Field
+                      label="Ngày chấm dứt"
+                      hint={bounds ? `Trong khoảng ${fmtDate(bounds.min)}${bounds.max ? ` – ${fmtDate(bounds.max)}` : ""}` : undefined}
+                      error={terminationDate && !terminationValid ? "Ngày phải nằm trong thời hạn hợp đồng." : undefined}
+                    >
+                      <input
+                        type="date"
+                        value={form.terminationDate}
+                        min={bounds?.min}
+                        max={bounds?.max}
+                        onChange={(e) => setForm({ ...form, terminationDate: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="Lý do">
+                      <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Ví dụ: khách chuyển đi" />
+                    </Field>
+                  </div>
+                )}
+              </div>
+              <button className="secondary-button" onClick={() => setConfirm(null)}>Hủy</button>
+              <button
+                className={confirm === "renew" ? "primary-button" : "danger-button"}
+                disabled={busy || (confirm === "renew" ? !form.newEndDate : !terminationValid || !form.reason.trim())}
+                onClick={() =>
+                  confirm === "renew"
+                    ? runAction(() => contractsApi.renew(detail.id, form.newEndDate), "Đã gia hạn hợp đồng")
+                    : runAction(() => contractsApi.terminate(detail.id, form.terminationDate, form.reason.trim()), "Đã chấm dứt hợp đồng")
+                }
+              >
+                Xác nhận
+              </button>
+            </>
+          ) : (
+            <>
+              {detail.status === "DRAFT" && (
+                <button className="primary-button" disabled={busy} onClick={() => runAction(() => contractsApi.sign(detail.id), "Hợp đồng đã được ký")}>
+                  <Icon name="check" size={15} /> Xác nhận đã ký
+                </button>
+              )}
+              {detail.status === "ACTIVE" && (
+                <>
+                  <button
+                    className="danger-button"
+                    onClick={() => {
+                      setActionError("");
+                      setForm((f) => ({ ...f, terminationDate: bounds ? bounds.clamp(f.terminationDate || todayVN()) : f.terminationDate }));
+                      setConfirm("terminate");
+                    }}
+                  >
+                    Chấm dứt / thanh lý
+                  </button>
+                  <button className="primary-button" onClick={() => { setActionError(""); setConfirm("renew"); }}>Gia hạn</button>
+                </>
+              )}
+            </>
+          )
+        ) : undefined}
+      >
+        {reloadWarning && <div className="alert alert-info mb-4"><Icon name="shield" size={18} /><div>{reloadWarning}</div></div>}
+        <Detail
+          contract={detail}
+          loading={detailLoading}
+          error={detailError}
+          refresh={refresh}
+          moveOut={currentMoveOut}
+          moveOutsNotice={moveOutsNotice}
+          canWrite={canWrite}
+          notify={notify}
+          toast={show}
+        />
+        {actionError && <div className="alert alert-error mt-4"><Icon name="shield" size={18} /><div>{actionError}</div></div>}
+        {!canWrite && <div className="alert alert-info mt-4"><Icon name="shield" size={18} />Vai trò SALE chỉ được xem. Ký, gia hạn, chấm dứt và quản lý người ở do QUẢN LÝ/ADMIN thực hiện.</div>}
       </Drawer>
       {toast}
     </>
