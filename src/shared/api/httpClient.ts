@@ -92,6 +92,7 @@ function tryRefresh(): Promise<boolean> {
  */
 export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { body, noRetry, headers, timeoutMs = DEFAULT_TIMEOUT_MS, signal, ...rest } = options;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const cid = newCorrelationId();
   const access = getAccessToken();
 
@@ -106,12 +107,12 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
         ...rest,
         signal: controller.signal,
         headers: {
-          "Content-Type": "application/json",
+          ...(!isFormData ? { "Content-Type": "application/json" } : {}),
           "X-Correlation-Id": cid,
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(headers ?? {}),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
       });
     } finally {
       window.clearTimeout(timer);
