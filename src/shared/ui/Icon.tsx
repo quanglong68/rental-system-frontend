@@ -29,7 +29,8 @@ export type IconName =
   | "home"
   | "edit"
   | "trash"
-  | "image";
+  | "image"
+  | "refresh";
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -59,9 +60,10 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     split: <><path d="M12 3v7M12 10 5 20M12 10l7 10" /><circle cx="12" cy="3" r="1" /></>,
     shield: <><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z" /><path d="m9 12 2 2 4-4" /></>,
     home: <><path d="M3 11 12 4l9 7M5 10v10h14V10" /></>,
-    edit: <><path d="M12 20h9M4 20l4.5-1 11-11a2 2 0 0 0-3-3l-11 11L4 20Z" /></>,
-    trash: <><path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m5 4v7m4-7v7" /></>,
-    image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m3 17 5-5 4 4 3-3 6 6" /></>,
+    edit: <><path d="m16 3 5 5-12 12-6 1 1-6ZM13 6l5 5" /></>,
+    trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></>,
+    image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1.5" /><path d="m21 15-6-6L3 21" /></>,
+    refresh: <><path d="M20 7a9 9 0 0 0-15-2L3 7m0-5v5h5M4 17a9 9 0 0 0 15 2l2-2m0 5v-5h-5" /></>,
   };
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
