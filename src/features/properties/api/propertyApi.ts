@@ -15,11 +15,14 @@ export type Building = {
     address: string;
     wardId: string;
     provinceId: string;
-    provinceName?: string;
-    wardName?: string;
     latitude: number;
     longitude: number;
     description: string | null
+};
+export type BuildingSearchResult = Building & {
+    provinceName: string | null;
+    wardName: string | null;
+    buildingUrlImage: string | null;
 };
 export type Province = { provinceId: string; code: string; name: string; divisionType: string | null };
 export type Ward = { wardId: string; provinceId: string; code: string; name: string; divisionType: string | null };
@@ -55,6 +58,14 @@ export type OccupancySummary = {
     businessDate: string
 };
 export type BuildingInput = Pick<Building, "name" | "address" | "wardId" | "provinceId" | "latitude" | "longitude" | "description">;
+export type BuildingImage = {
+    imageId: string;
+    ownerId: string;
+    imageUrl: string;
+    displayOrder: number;
+    primaryImage: boolean;
+    createdAt: string;
+};
 export type RoomType = { id: string; typeCode: string; name: string };
 export type RoomInput = Pick<Room, "buildingId" | "roomTypeId" | "roomCode" | "maxCapacity" | "area" | "bedroomCount" | "bathroomCount" | "basePrice" | "status">;
 
@@ -62,9 +73,9 @@ const unwrap = async <T>(request: Promise<Envelope<T>>) => (await request).data;
 const query = (params: Record<string, string | number | undefined>) => new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== "").map(([key, value]) => [key, String(value)])).toString();
 
 export const propertyApi = {
-    buildings: (page: number, keyword: string, provinceId: string, wardId: string, signal?: AbortSignal) => unwrap(apiFetch<Envelope<Page<Building>>>(`/api/v1/buildings/search?${query({
+    buildings: (page: number, size: number, keyword: string, provinceId: string, wardId: string, signal?: AbortSignal) => unwrap(apiFetch<Envelope<Page<BuildingSearchResult>>>(`/api/v1/buildings/search?${query({
         page,
-        size: 20,
+        size,
         keyword: keyword || undefined,
         provinceId: provinceId || undefined,
         wardId: wardId || undefined
@@ -77,6 +88,14 @@ export const propertyApi = {
         body: input
     })),
     deleteBuilding: (id: string) => unwrap(apiFetch<Envelope<null>>(`/api/v1/buildings/${encodeURIComponent(id)}`, {method: "DELETE"})),
+    buildingImages: (id: string, signal?: AbortSignal) => unwrap(apiFetch<Envelope<BuildingImage[]>>(`/api/v1/images/buildings/${encodeURIComponent(id)}`, {signal})),
+    uploadBuildingImage: (id: string, file: File) => {
+        const form = new FormData();
+        form.append("file", file);
+        return unwrap(apiFetch<Envelope<BuildingImage>>(`/api/v1/images/buildings/${encodeURIComponent(id)}`, {
+            method: "POST", body: form, timeoutMs: 60_000
+        }));
+    },
     rooms: (buildingId: string, page: number, sort: string, signal?: AbortSignal) => unwrap(apiFetch<Envelope<Page<Room>>>(`/api/v1/rooms?${query({
         buildingId,
         page,

@@ -12,6 +12,7 @@ const Roommates = lazy(() => import("@/features/roommates/ui/Roommates"));
 const Profile = lazy(() => import("@/features/tenant-home/ui/Profile"));
 const Requests = lazy(() => import("@/features/bookings/ui/Requests"));
 const Buildings = lazy(() => import("@/features/properties/ui/BuildingManagement"));
+const BuildingFormPage = lazy(() => import("@/features/properties/ui/BuildingFormPage"));
 const BuildingRoomsPage = lazy(() => import("@/features/properties/ui/BuildingRoomsPage"));
 const RoomDetailPage = lazy(() => import("@/features/properties/ui/RoomDetailPage"));
 const Rooms = lazy(() => import("@/features/properties/ui/Rooms"));
@@ -88,6 +89,8 @@ export const router = createBrowserRouter([
       { index: true, element: <AdminIndex /> },
       { path: "overview", element: <RequireAdminSection section="overview"><DashboardPage /></RequireAdminSection> },
       { path: "buildings", element: <RequireAdminSection section="buildings"><Buildings /></RequireAdminSection> },
+      { path: "buildings/new", element: <RequireAdminSection section="buildings"><BuildingFormPage /></RequireAdminSection> },
+      { path: "buildings/:buildingId/edit", element: <RequireAdminSection section="buildings"><BuildingFormPage /></RequireAdminSection> },
       { path: "buildings/:buildingId", element: <RequireAdminSection section="buildings"><BuildingRoomsPage /></RequireAdminSection> },
       { path: "buildings/:buildingId/rooms", element: <RequireAdminSection section="buildings"><BuildingRoomsPage /></RequireAdminSection> },
       { path: "buildings/:buildingId/rooms/:roomId", element: <RequireAdminSection section="buildings"><RoomDetailPage /></RequireAdminSection> },

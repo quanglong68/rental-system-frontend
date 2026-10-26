@@ -87,7 +87,7 @@ export default function BuildingRoomsPage() {
     const rooms = useMemo(() => result?.content.filter((room) => room.roomCode.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi")) && (!status || room.status === status)) ?? [], [result, search, status]);
     if (!buildingId) return <Navigate to="/admin/buildings" replace/>;
     return <>
-        <PropertyBreadcrumbs building={building}/>
+        <PropertyBreadcrumbs building={building} rooms/>
         <PageHead eyebrow="" title={building?.name ?? (loading ? "Đang tải tòa nhà…" : "Tòa nhà")}
                   desc={building?.address ?? "Danh sách phòng thuộc tòa nhà."}
                   actions={<><Link className="secondary-button" to="/admin/buildings">Quay lại danh sách tòa nhà</Link>

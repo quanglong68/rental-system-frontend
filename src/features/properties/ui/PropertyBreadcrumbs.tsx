@@ -1,16 +1,20 @@
 import {Link} from "react-router";
 
-export default function PropertyBreadcrumbs({building, room}: {
+export default function PropertyBreadcrumbs({building, room, rooms, action}: {
     building?: { buildingId: string; name: string } | null;
-    room?: { roomCode: string } | null
+    room?: { roomCode: string } | null;
+    rooms?: boolean;
+    action?: string;
 }) {
     const items = [
         {label: "Quản lý tài sản", to: "/admin/buildings"},
-        {label: "Tòa nhà", to: building ? "/admin/buildings" : undefined},
+        {label: "Tòa nhà", to: building || action ? "/admin/buildings" : undefined},
+        ...(action ? [{label: action, to: undefined}] : []),
         ...(building ? [{
             label: building.name,
-            to: room ? `/admin/buildings/${building.buildingId}/rooms` : undefined
+            to: room || rooms ? `/admin/buildings/${building.buildingId}/rooms` : undefined
         }] : []),
+        ...(building && (room || rooms) ? [{label: "Phòng", to: room ? `/admin/buildings/${building.buildingId}/rooms` : undefined}] : []),
         ...(room ? [{label: `Phòng ${room.roomCode}`, to: undefined}] : []),
     ];
     return <nav aria-label="Đường dẫn" className="property-breadcrumbs">{items.map((item, index) => <span
