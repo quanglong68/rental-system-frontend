@@ -1,4 +1,7 @@
 import {apiFetch} from "@/shared/api/httpClient";
+import type { PageResult } from "@/api/pagedHistory";
+
+export type { PageResult } from "@/api/pagedHistory";
 
 export type Appliance = {
     id: number;
@@ -45,8 +48,8 @@ export type MaintenanceSchedule = {
     nextDate: string;
     lastDoneDate?: string
 };
-type PageResult<T> = { content: T[]; page: number; size: number; totalElements: number; totalPages: number };
-const content = <T, >(value: PageResult<T>) => value.content;
+const content = <T,>(value: PageResult<T>) => value.content;
+const pageQuery = (page: number, size: number) => `?page=${page}&size=${size}`;
 export const assetApi = {
     appliances: async (params = "") => content(await apiFetch<PageResult<Appliance>>(`/api/v1/appliances${params}`)),
     createAppliance: (body: {
@@ -63,8 +66,12 @@ export const assetApi = {
         startDate: string;
         endDate: string
     }) => apiFetch<Appliance>(`/api/v1/appliances/${id}/warranty`, {method: "PUT", body}),
+    deleteAppliance: (id: number) => apiFetch<void>(`/api/v1/appliances/${id}`, {method: "DELETE"}),
     reports: async (buildingId: number, status?: string) => content(await apiFetch<PageResult<MaintenanceReport>>(`/api/v1/reports?buildingId=${buildingId}${status ? `&status=${status}` : ""}`)),
+    myReportsPage: (page = 0, size = 20) => apiFetch<PageResult<MaintenanceReport>>(`/api/v1/reports/mine${pageQuery(page, size)}`),
+    myRequestsPage: (page = 0, size = 20) => apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests/mine${pageQuery(page, size)}`),
     myReports: async () => content(await apiFetch<PageResult<MaintenanceReport>>("/api/v1/reports/mine")),
+    myRequests: async (params = "") => content(await apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests/mine${params}`)),
     createReport: (body: {
         roomId: number;
         title: string;
@@ -92,6 +99,11 @@ export const assetApi = {
         body: {reason}
     }),
     requests: async (params = "") => content(await apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests${params}`)),
+    assign: (id: number, body: {
+        staffId: number;
+        priority: string;
+        scheduledAt: string
+    }) => apiFetch<MaintenanceRequest>(`/api/v1/maintenance-requests/${id}/assign`, {method: "PUT", body}),
     start: (id: number) => apiFetch<MaintenanceRequest>(`/api/v1/maintenance-requests/${id}/start`, {method: "PUT"}),
     complete: (id: number, body: {
         actionTaken: string;
@@ -106,5 +118,13 @@ export const assetApi = {
         intervalMonths: number;
         firstDate: string
     }) => apiFetch<MaintenanceSchedule>("/api/v1/maintenance-schedules", {method: "POST", body}),
+    updateSchedule: (id: number, body: {
+        staffId: number;
+        title: string;
+        description?: string;
+        intervalMonths: number;
+        nextDate: string
+    }) => apiFetch<MaintenanceSchedule>(`/api/v1/maintenance-schedules/${id}`, {method: "PUT", body}),
+    deleteSchedule: (id: number) => apiFetch<void>(`/api/v1/maintenance-schedules/${id}`, {method: "DELETE"}),
     completeSchedule: (id: number) => apiFetch<MaintenanceSchedule>(`/api/v1/maintenance-schedules/${id}/complete`, {method: "POST"}),
 };

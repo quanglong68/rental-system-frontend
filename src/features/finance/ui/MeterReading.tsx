@@ -17,6 +17,10 @@ function money(n: number) {
 const errText = (e: unknown) =>
   e instanceof ApiError ? `${e.code} · ${e.message}` : e instanceof Error ? e.message : "Đã xảy ra lỗi.";
 
+/**
+ * Chưa có backend billing-utility-service hoạt động: gateway có cấu hình route
+ * meter-reading nhưng service chưa tồn tại trong repo. Không dùng dữ liệu/hành động giả.
+ */
 export default function MeterReading() {
   const { user } = useAuth();
   const canWrite = user?.role === "QUAN_LY" || user?.role === "ADMIN" || user?.role === "KY_THUAT";

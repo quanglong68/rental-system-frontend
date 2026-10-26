@@ -44,6 +44,10 @@ function tenantKey(invoice: Invoice, idx: number) {
   return `${invoice.contractId}-${invoice.month}-${invoice.year}-${invoice.contractTenantId ?? idx}`;
 }
 
+/**
+ * Chưa có dịch vụ hóa đơn public: api-gateway có route `/api/v1/invoices/**` nhưng
+ * `billing-utility-service` chưa tồn tại trong repo (và chưa chạy). Không dựng dữ liệu giả.
+ */
 export default function Finance() {
   const { user } = useAuth();
   const canWrite = user?.role === "QUAN_LY" || user?.role === "ADMIN";

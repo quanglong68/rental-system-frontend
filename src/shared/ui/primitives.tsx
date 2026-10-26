@@ -40,10 +40,10 @@ export function MiniStat({ label, value, note, tone = "teal" }: { label: string;
   );
 }
 
-export function Toolbar({ placeholder, children }: { placeholder: string; children?: React.ReactNode }) {
+export function Toolbar({ placeholder, value, onChange, children }: { placeholder: string; value?: string; onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void; children?: React.ReactNode }) {
   return (
     <div className="toolbar">
-      <label className="field-search"><Icon name="search" size={16} /><input placeholder={placeholder} /></label>
+      <label className="field-search"><Icon name="search" size={16} /><input placeholder={placeholder} value={value} onChange={onChange} /></label>
       <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );
