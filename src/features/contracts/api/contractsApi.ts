@@ -2,6 +2,14 @@ import { apiFetch } from "@/shared/api/httpClient";
 
 /** Khớp DTO thật của contract-tenant-service (ContractResponse / ContractDetailResponse). */
 export type ContractStatus = "DRAFT" | "ACTIVE" | "TERMINATED" | "ENDED";
+
+export type CreateDraftManualRequest = {
+  customerId: number;
+  roomId: number;
+  buildingId: number;
+  startDate: string; // "yyyy-MM-dd"
+  rentAmount: number;
+};
 export type MoveOutStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
 
 export type Contract = {
@@ -109,4 +117,6 @@ export const contractsApi = {
     apiFetch<MoveOutRequest>(`/api/v1/move-out-requests/${id}/approve`, { method: "PUT" }),
   rejectMoveOut: (id: number, reason: string) =>
     apiFetch<MoveOutRequest>(`/api/v1/move-out-requests/${id}/reject`, { method: "PUT", body: { reason } }),
+  createManualDraft: (body: CreateDraftManualRequest) =>
+    apiFetch<Contract>("/api/v1/contracts/drafts", { method: "POST", body }),
 };

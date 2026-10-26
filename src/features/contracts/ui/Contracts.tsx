@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { hasAnyRole, useAuth } from "@/features/auth";
 import { ApiError } from "@/shared/api/httpClient";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, todayVN, toVNTime, useToast, vnd, type Tone } from "@/shared/ui";
@@ -349,7 +350,9 @@ function Detail({
 
 export default function Contracts() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const canWrite = hasAnyRole(user, ["QUAN_LY", "ADMIN"]);
+  const canCreateDraft = hasAnyRole(user, ["SALE", "QUAN_LY", "ADMIN"]);
   const [tab, setTab] = useState("Tất cả");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<Contract[]>([]);
@@ -518,6 +521,11 @@ export default function Contracts() {
         eyebrow="Pháp lý"
         title="Hợp đồng thuê"
         desc="Theo dõi vòng đời hợp đồng: ký, gia hạn, chấm dứt, quản lý người ở và duyệt yêu cầu dọn đi. Ngày hiển thị theo dữ liệu backend (YYYY-MM-DD)."
+        actions={canCreateDraft ? (
+          <button className="cx-btn" onClick={() => navigate("/admin/contracts/new-draft")}>
+            <Icon name="plus" size={16} /> Tạo hợp đồng nháp
+          </button>
+        ) : undefined}
       />
       <section className="stats-grid mb-6">
         <MiniStat label="Đang hiệu lực" value={counts?.active != null ? String(counts.active) : "—"} note={counts ? "Hợp đồng ACTIVE" : "Không tải được"} />

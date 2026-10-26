@@ -17,6 +17,7 @@ const BuildingRoomsPage = lazy(() => import("@/features/properties/ui/BuildingRo
 const RoomDetailPage = lazy(() => import("@/features/properties/ui/RoomDetailPage"));
 const Rooms = lazy(() => import("@/features/properties/ui/Rooms"));
 const Contracts = lazy(() => import("@/features/contracts/ui/Contracts"));
+const CreateDraftContractPage = lazy(() => import("@/features/contracts/ui/CreateDraftContractPage"));
 const Finance = lazy(() => import("@/features/finance/ui/Finance"));
 const Maintenance = lazy(() => import("@/features/maintenance/ui/Maintenance"));
 const Tenants = lazy(() => import("@/features/people/ui/Tenants"));
@@ -96,6 +97,7 @@ export const router = createBrowserRouter([
       { path: "buildings/:buildingId/rooms/:roomId", element: <RequireAdminSection section="buildings"><RoomDetailPage /></RequireAdminSection> },
       { path: "rooms", element: <RequireAdminSection section="rooms"><Rooms /></RequireAdminSection> },
       { path: "contracts", element: <RequireAdminSection section="contracts"><Contracts /></RequireAdminSection> },
+      { path: "contracts/new-draft", element: <RequireAdminSection section="contracts"><CreateDraftContractPage /></RequireAdminSection> },
       { path: "finance", element: <RequireAdminSection section="finance"><Finance /></RequireAdminSection> },
       { path: "maintenance", element: <RequireAdminSection section="maintenance"><Maintenance /></RequireAdminSection> },
       { path: "assets", element: <RequireAdminSection section="assets"><Assets /></RequireAdminSection> },
