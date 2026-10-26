@@ -1,3 +1,4 @@
+import { usePropertyConfirm } from "./usePropertyConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, todayVN, useToast, type Tone } from "@/shared/ui";
 import { useAuth } from "@/features/auth";
@@ -23,6 +24,7 @@ const stateLabel: Record<string, string> = {
 };
 
 export default function Assets() {
+  const [confirmationPopup, confirm] = usePropertyConfirm();
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const isTech = user?.role === "KY_THUAT";
@@ -411,7 +413,7 @@ export default function Assets() {
 
   const handleDeleteAppliance = async (id: number) => {
     if (!canManageAssets) return;
-    if (!window.confirm("Bạn có chắc chắn muốn xóa thiết bị này?")) return;
+    if (!await confirm({ title: "Xóa thiết bị", message: "Bạn có chắc chắn muốn xóa thiết bị này?", confirmLabel: "Xóa thiết bị" })) return;
     setDeletingApplianceId(id);
     try {
       await assetApi.deleteAppliance(id);
@@ -480,7 +482,7 @@ export default function Assets() {
 
   const handleDeleteSchedule = async (id: number) => {
     if (!canManageAssets) return;
-    if (!window.confirm("Bạn có chắc chắn muốn xóa lịch bảo trì này?")) return;
+    if (!await confirm({ title: "Xóa lịch bảo trì", message: "Bạn có chắc chắn muốn xóa lịch bảo trì này?", confirmLabel: "Xóa lịch bảo trì" })) return;
     setDeletingScheduleId(id);
     try {
       await assetApi.deleteSchedule(id);
@@ -515,6 +517,7 @@ export default function Assets() {
 
   return (
     <>
+      {confirmationPopup}
       <PageHead
         eyebrow="Vận hành"
         title="Tài sản & Bảo trì định kỳ"
