@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Field, Icon, PageHead, Pill, Tabs, toVNTime, useToast, type Tone } from "@/shared/ui";
 import { assetApi, type MaintenanceRequest } from "@/api/assetMaintenance";
+import { fetchPagedHistory } from "@/api/pagedHistory";
 
 const prioTone: Record<string, Tone> = {
   URGENT: "coral",
@@ -33,6 +34,7 @@ export default function TechTasks() {
   const [tasks, setTasks] = useState<MaintenanceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [partial, setPartial] = useState(false);
 
   const [selectedTask, setSelectedTask] = useState<MaintenanceRequest | null>(null);
 
@@ -46,10 +48,15 @@ export default function TechTasks() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setPartial(false);
     try {
-      const data = await assetApi.requests("?size=100");
-      setTasks(data || []);
-      if (data && data.length > 0) {
+      const history = await fetchPagedHistory(
+        (page, size) => assetApi.requestsPage(`?page=${page}&size=${size}`),
+      );
+      const data = history.items;
+      setTasks(data);
+      setPartial(!history.complete);
+      if (data.length > 0) {
         setSelectedTask((prev) => {
           if (!prev) return data[0];
           return data.find((t) => t.id === prev.id) || data[0];
@@ -124,6 +131,7 @@ export default function TechTasks() {
         }
       />
 
+      {partial && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Chỉ tải được một phần danh sách công việc.</div>}
       {loading ? (
         <div className="p-12 text-center text-sm text-muted">Đang tải danh sách công việc…</div>
       ) : error ? (

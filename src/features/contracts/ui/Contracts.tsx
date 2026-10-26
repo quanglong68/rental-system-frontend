@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/features/auth";
+import { useNavigate } from "react-router";
+import { hasAnyRole, useAuth } from "@/features/auth";
 import { ApiError } from "@/shared/api/httpClient";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, todayVN, toVNTime, useToast, vnd, type Tone } from "@/shared/ui";
 import {
@@ -349,7 +350,9 @@ function Detail({
 
 export default function Contracts() {
   const { user } = useAuth();
-  const canWrite = user?.role === "QUAN_LY" || user?.role === "ADMIN";
+  const navigate = useNavigate();
+  const canWrite = hasAnyRole(user, ["QUAN_LY", "ADMIN"]);
+  const canCreateDraft = hasAnyRole(user, ["SALE", "QUAN_LY", "ADMIN"]);
   const [tab, setTab] = useState("Tất cả");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<Contract[]>([]);
@@ -363,8 +366,11 @@ export default function Contracts() {
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
-  const [confirm, setConfirm] = useState<"renew" | "terminate" | null>(null);
-  const [form, setForm] = useState({ newEndDate: "", terminationDate: todayVN(), reason: "" });
+  const [confirm, setConfirm] = useState<"draft" | "renew" | "terminate" | null>(null);
+  const [form, setForm] = useState({
+    startDate: "", endDate: "", rentAmount: "", depositAmount: "",
+    newEndDate: "", terminationDate: todayVN(), reason: "",
+  });
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [reloadWarning, setReloadWarning] = useState("");
@@ -455,7 +461,10 @@ export default function Contracts() {
     setConfirm(null);
     setActionError("");
     setReloadWarning("");
-    setForm({ newEndDate: plusYear(c.endDate), terminationDate: bounds.clamp(todayVN()), reason: "" });
+    setForm({
+      startDate: c.startDate, endDate: c.endDate ?? "", rentAmount: c.rentAmount?.toString() ?? "", depositAmount: c.depositAmount?.toString() ?? "",
+      newEndDate: plusYear(c.endDate), terminationDate: bounds.clamp(todayVN()), reason: "",
+    });
     setOpenId(c.id);
   };
 
@@ -487,6 +496,24 @@ export default function Contracts() {
   const bounds = detail ? terminationBounds(detail) : null;
   const terminationDate = form.terminationDate;
   const terminationValid = !!bounds && bounds.valid(terminationDate);
+  const rentAmount = Number(form.rentAmount);
+  const depositAmount = form.depositAmount.trim() ? Number(form.depositAmount) : null;
+  const draftValid = !!form.startDate
+    && (!form.endDate || form.endDate > form.startDate)
+    && Number.isInteger(rentAmount) && rentAmount > 0
+    && (depositAmount == null || (Number.isInteger(depositAmount) && depositAmount >= 0));
+  const updateDraft = () => {
+    if (!detail) return;
+    return runAction(
+      () => contractsApi.updateDraft(detail.id, {
+        startDate: form.startDate,
+        endDate: form.endDate || null,
+        rentAmount,
+        depositAmount,
+      }),
+      "Đã cập nhật hợp đồng nháp",
+    );
+  };
 
   return (
     <>
@@ -494,6 +521,11 @@ export default function Contracts() {
         eyebrow="Pháp lý"
         title="Hợp đồng thuê"
         desc="Theo dõi vòng đời hợp đồng: ký, gia hạn, chấm dứt, quản lý người ở và duyệt yêu cầu dọn đi. Ngày hiển thị theo dữ liệu backend (YYYY-MM-DD)."
+        actions={canCreateDraft ? (
+          <button className="cx-btn" onClick={() => navigate("/admin/contracts/new-draft")}>
+            <Icon name="plus" size={16} /> Tạo hợp đồng nháp
+          </button>
+        ) : undefined}
       />
       <section className="stats-grid mb-6">
         <MiniStat label="Đang hiệu lực" value={counts?.active != null ? String(counts.active) : "—"} note={counts ? "Hợp đồng ACTIVE" : "Không tải được"} />
@@ -564,7 +596,18 @@ export default function Contracts() {
           confirm ? (
             <>
               <div className="mr-auto self-center">
-                {confirm === "renew" ? (
+                {confirm === "draft" ? (
+                  <div className="form-grid">
+                    <p className="span-2 text-xs text-muted">
+                      Chỉ cập nhật điều khoản của hợp đồng nháp #{detail.id}. Không tạo hợp đồng mới;
+                      hợp đồng mới do contract-tenant-service tạo từ event <code>RentalRequestAccepted</code>.
+                    </p>
+                    <Field label="Ngày bắt đầu"><input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
+                    <Field label="Ngày kết thúc" error={form.endDate && form.endDate <= form.startDate ? "Ngày kết thúc phải sau ngày bắt đầu." : undefined}><input type="date" value={form.endDate} min={form.startDate || undefined} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></Field>
+                    <Field label="Giá thuê (VNĐ)"><input type="number" min="1" step="1" value={form.rentAmount} onChange={(e) => setForm({ ...form, rentAmount: e.target.value })} /></Field>
+                    <Field label="Tiền cọc (VNĐ)"><input type="number" min="0" step="1" value={form.depositAmount} onChange={(e) => setForm({ ...form, depositAmount: e.target.value })} /></Field>
+                  </div>
+                ) : confirm === "renew" ? (
                   <Field label="Ngày kết thúc mới">
                     <input type="date" value={form.newEndDate} onChange={(e) => setForm({ ...form, newEndDate: e.target.value })} />
                   </Field>
@@ -591,12 +634,14 @@ export default function Contracts() {
               </div>
               <button className="secondary-button" onClick={() => setConfirm(null)}>Hủy</button>
               <button
-                className={confirm === "renew" ? "primary-button" : "danger-button"}
-                disabled={busy || (confirm === "renew" ? !form.newEndDate : !terminationValid || !form.reason.trim())}
+                className={confirm === "terminate" ? "danger-button" : "primary-button"}
+                disabled={busy || (confirm === "draft" ? !draftValid : confirm === "renew" ? !form.newEndDate : !terminationValid || !form.reason.trim())}
                 onClick={() =>
-                  confirm === "renew"
-                    ? runAction(() => contractsApi.renew(detail.id, form.newEndDate), "Đã gia hạn hợp đồng")
-                    : runAction(() => contractsApi.terminate(detail.id, form.terminationDate, form.reason.trim()), "Đã chấm dứt hợp đồng")
+                  confirm === "draft"
+                    ? updateDraft()
+                    : confirm === "renew"
+                      ? runAction(() => contractsApi.renew(detail.id, form.newEndDate), "Đã gia hạn hợp đồng")
+                      : runAction(() => contractsApi.terminate(detail.id, form.terminationDate, form.reason.trim()), "Đã chấm dứt hợp đồng")
                 }
               >
                 Xác nhận
@@ -605,9 +650,14 @@ export default function Contracts() {
           ) : (
             <>
               {detail.status === "DRAFT" && (
-                <button className="primary-button" disabled={busy} onClick={() => runAction(() => contractsApi.sign(detail.id), "Hợp đồng đã được ký")}>
-                  <Icon name="check" size={15} /> Xác nhận đã ký
-                </button>
+                <>
+                  <button className="secondary-button" disabled={busy} title="Chỉ sửa hợp đồng nháp hiện có, không tạo hợp đồng mới" onClick={() => { setActionError(""); setConfirm("draft"); }}>
+                    Cập nhật điều khoản nháp
+                  </button>
+                  <button className="primary-button" disabled={busy} onClick={() => runAction(() => contractsApi.sign(detail.id), "Hợp đồng đã được ký")}>
+                    <Icon name="check" size={15} /> Xác nhận đã ký
+                  </button>
+                </>
               )}
               {detail.status === "ACTIVE" && (
                 <>

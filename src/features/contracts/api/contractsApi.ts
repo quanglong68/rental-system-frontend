@@ -2,6 +2,14 @@ import { apiFetch } from "@/shared/api/httpClient";
 
 /** Khớp DTO thật của contract-tenant-service (ContractResponse / ContractDetailResponse). */
 export type ContractStatus = "DRAFT" | "ACTIVE" | "TERMINATED" | "ENDED";
+
+export type CreateDraftManualRequest = {
+  customerId: number;
+  roomId: number;
+  buildingId: number;
+  startDate: string; // "yyyy-MM-dd"
+  rentAmount: number;
+};
 export type MoveOutStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
 
 export type Contract = {
@@ -84,6 +92,8 @@ export const contractsApi = {
   list: async (params: { buildingId?: number; roomId?: number; status?: ContractStatus; page?: number; size?: number }) =>
     toPage(await apiFetch<RawPage<Contract>>(`/api/v1/contracts${qs(params)}`)),
   detail: (id: number) => apiFetch<ContractDetail>(`/api/v1/contracts/${id}`),
+  updateDraft: (id: number, body: { startDate: string; endDate: string | null; rentAmount: number; depositAmount: number | null }) =>
+    apiFetch<Contract>(`/api/v1/contracts/${id}`, { method: "PUT", body }),
   sign: (id: number) => apiFetch<Contract>(`/api/v1/contracts/${id}/sign`, { method: "POST" }),
   renew: (id: number, newEndDate: string) =>
     apiFetch<Contract>(`/api/v1/contracts/${id}/renew`, { method: "POST", body: { newEndDate } }),
@@ -107,4 +117,6 @@ export const contractsApi = {
     apiFetch<MoveOutRequest>(`/api/v1/move-out-requests/${id}/approve`, { method: "PUT" }),
   rejectMoveOut: (id: number, reason: string) =>
     apiFetch<MoveOutRequest>(`/api/v1/move-out-requests/${id}/reject`, { method: "PUT", body: { reason } }),
+  createManualDraft: (body: CreateDraftManualRequest) =>
+    apiFetch<Contract>("/api/v1/contracts/drafts", { method: "POST", body }),
 };

@@ -43,6 +43,7 @@ const roles: Record<StaffRole, { title: string; scope: string; nav: NavItem[] }>
   SALE: {
     title: "Nhân viên kinh doanh", scope: "The Fern House", nav: [
       { label: "Khách tiềm năng", path: "leads", icon: "users" }, { label: "Phòng & Tin đăng", path: "rooms", icon: "door" }, { label: "Hợp đồng", path: "contracts", icon: "contract" },
+      { label: "Bảo trì", path: "maintenance", icon: "tools" },
     ]
   },
 };
@@ -85,9 +86,16 @@ export default function AdminLayout() {
   };
 
   if (!user || user.role === "CUSTOMER" || user.role === "UNKNOWN") return null;
-  const role = user.role;
+  const role = user.role as StaffRole;
   const current = roles[role];
-  const navItems = current.nav.filter((item) => canAccessAdminSection(role, item.path));
+  const staffRoles = user.roles.filter((item): item is StaffRole => item in roles);
+  const navByPath = new Map<string, NavItem>();
+  for (const staffRole of staffRoles) {
+    for (const item of roles[staffRole].nav) {
+      if (!navByPath.has(item.path)) navByPath.set(item.path, item);
+    }
+  }
+  const navItems = [...navByPath.values()].filter((item) => canAccessAdminSection(user.roles, item.path));
   const pathParts = location.pathname.split("/").filter(Boolean);
   const section = pathParts.length > 1 ? pathParts[1] : undefined;
   const active = navItems.find((item) => item.path === section) ?? navItems[0];

@@ -54,7 +54,7 @@ export default function Tenants() {
         if (result.status === "fulfilled") {
           const detail = result.value;
           if (detail.tenants && detail.tenants.length > 0) {
-            for (const t of detail.tenants) {
+            for (const t of detail.tenants.filter((tenant) => !tenant.leftAt)) {
               allResidents.push({
                 tenantId: t.id,
                 contractId: contract.id,
@@ -215,22 +215,14 @@ export default function Tenants() {
                     <button
                       className="secondary-button !h-8 !px-3 text-xs"
                       disabled={page === 0 || loading}
-                      onClick={() => {
-                        const next = page - 1;
-                        setPage(next);
-                        void loadData(next);
-                      }}
+                      onClick={() => setPage(page - 1)}
                     >
                       Trang trước
                     </button>
                     <button
                       className="secondary-button !h-8 !px-3 text-xs"
                       disabled={page >= totalPages - 1 || loading}
-                      onClick={() => {
-                        const next = page + 1;
-                        setPage(next);
-                        void loadData(next);
-                      }}
+                      onClick={() => setPage(page + 1)}
                     >
                       Trang sau
                     </button>
