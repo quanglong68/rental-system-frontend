@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState, type FormEvent} from "react";
-import {Link, Navigate, useParams} from "react-router";
+import {Link, Navigate, useNavigate, useParams} from "react-router";
 import {Drawer, Field, Icon, PageHead, Pill, vnd} from "@/shared/ui";
 import {
     propertyApi,
@@ -10,6 +10,7 @@ import {
     type RoomType
 } from "@/features/properties/api/propertyApi";
 import PropertyBreadcrumbs from "./PropertyBreadcrumbs";
+import { usePropertyConfirm } from "./usePropertyConfirm";
 import "./property.css";
 
 export const roomStatuses = {
@@ -21,6 +22,8 @@ export const roomStatuses = {
 
 export default function BuildingRoomsPage() {
     const {buildingId} = useParams();
+    const navigate = useNavigate();
+    const [confirmationPopup, confirm] = usePropertyConfirm();
     const [building, setBuilding] = useState<Building | null>(null);
     const [result, setResult] = useState<Page<Room> | null>(null);
     const [page, setPage] = useState(0);
@@ -31,6 +34,7 @@ export default function BuildingRoomsPage() {
     const [error, setError] = useState("");
     const [reload, setReload] = useState(0);
     const [creating, setCreating] = useState(false);
+    const [editingRoom, setEditingRoom] = useState<Room | null>(null);
     const [types, setTypes] = useState<RoomType[]>([]);
     const [form, setForm] = useState<RoomInput>({
         buildingId: buildingId ?? "",
@@ -45,7 +49,12 @@ export default function BuildingRoomsPage() {
     });
     const [formError, setFormError] = useState("");
     const [saving, setSaving] = useState(false);
+    const [roomImages, setRoomImages] = useState<File[]>([]);
+    const [imageProgress, setImageProgress] = useState("");
     const openCreate = async () => {
+        setEditingRoom(null);
+        setForm({buildingId: buildingId ?? "", roomTypeId: "", roomCode: "", maxCapacity: 1, area: 1, bedroomCount: 0, bathroomCount: 1, basePrice: 0, status: "VACANT"});
+        setRoomImages([]);
         setCreating(true);
         setFormError("");
         try {
@@ -60,13 +69,31 @@ export default function BuildingRoomsPage() {
         setSaving(true);
         setFormError("");
         try {
-            await propertyApi.createRoom({...form, buildingId: buildingId!});
+            const savedRoom = editingRoom
+                ? await propertyApi.updateRoom(editingRoom.id, {...form, buildingId: buildingId!})
+                : await propertyApi.createRoom({...form, buildingId: buildingId!});
+            for (let index = 0; index < roomImages.length; index++) {
+                const image = roomImages[index];
+                setImageProgress(`Đang tải ảnh ${index + 1}/${roomImages.length}: ${image.name}`);
+                try {
+                    await propertyApi.uploadRoomImage(savedRoom.id, image);
+                    setRoomImages((files) => files.filter((file) => file !== image));
+                } catch (cause) {
+                    setEditingRoom(savedRoom);
+                    setFormError(`Phòng ${savedRoom.roomCode} đã được lưu, nhưng ảnh “${image.name}” tải lên thất bại: ${cause instanceof Error ? cause.message : "Lỗi tải ảnh."} Chọn Lưu thay đổi để thử lại ảnh còn lại.`);
+                    setReload((value) => value + 1);
+                    return;
+                }
+            }
             setCreating(false);
+            setEditingRoom(null);
+            setRoomImages([]);
             setReload((value) => value + 1);
         } catch (cause) {
             setFormError(cause instanceof Error ? cause.message : "Không tạo được phòng.");
         } finally {
             setSaving(false);
+            setImageProgress("");
         }
     };
     useEffect(() => {
@@ -164,10 +191,10 @@ export default function BuildingRoomsPage() {
             </section>
             <p className="property-note">Tìm kiếm và lọc trạng thái áp dụng cho trang đang xem vì API phòng chưa hỗ trợ
                 lọc trên toàn bộ danh sách.</p></>}
-        <Drawer open={creating} title="Thêm phòng" onClose={() => setCreating(false)} footer={<>
-            <button className="secondary-button" onClick={() => setCreating(false)}>Hủy</button>
+        <Drawer open={creating} title={editingRoom ? `Sửa phòng ${editingRoom.roomCode}` : "Thêm phòng"} onClose={() => { setCreating(false); setEditingRoom(null); }} footer={<>
+            <button className="secondary-button" onClick={() => { setCreating(false); setEditingRoom(null); }}>Hủy</button>
             <button className="primary-button" form="room-form"
-                    disabled={saving || !types.length}>{saving ? "Đang lưu…" : "Tạo phòng"}</button>
+                    disabled={saving || !types.length}>{saving ? "Đang lưu…" : editingRoom ? "Lưu thay đổi" : "Tạo phòng"}</button>
         </>}>
             <form id="room-form" onSubmit={create} className="property-form"><Field label="Mã phòng"><input required
                                                                                                             maxLength={50}
@@ -212,7 +239,18 @@ export default function BuildingRoomsPage() {
                                                                                                  status: event.target.value as Room["status"]
                                                                                              })}>{Object.entries(roomStatuses).map(([value, item]) =>
                 <option key={value} value={value}>{item.label}</option>)}</select></Field>{formError &&
-                <p role="alert" className="field-error">{formError}</p>}</form>
+                <p role="alert" className="field-error">{formError}</p>}
+                {!editingRoom && <Field label="Ảnh phòng"><input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={saving} onChange={(event) => {
+                    const selected = Array.from(event.target.files ?? []);
+                    const allowed = selected.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size > 0 && file.size <= 5 * 1024 * 1024);
+                    if (allowed.length !== selected.length) setFormError("Chỉ nhận ảnh JPEG, PNG hoặc WebP có dung lượng tối đa 5 MiB mỗi ảnh.");
+                    else if (allowed.reduce((total, file) => total + file.size, 0) + roomImages.reduce((total, file) => total + file.size, 0) > 50 * 1024 * 1024) setFormError("Tổng dung lượng ảnh không được vượt quá 50 MiB.");
+                    else { setFormError(""); setRoomImages((files) => [...files, ...allowed]); }
+                    event.target.value = "";
+                }}/><span className="field-hint">JPEG, PNG hoặc WebP · tối đa 5 MiB mỗi ảnh và 50 MiB tổng cộng. Ảnh được tải sau khi tạo phòng.</span></Field>}
+                {roomImages.length > 0 && <div className="room-create-image-list" aria-label="Ảnh đã chọn">{roomImages.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`}><span>{file.name} · {(file.size / (1024 * 1024)).toFixed(1)} MiB</span><button type="button" disabled={saving} aria-label={`Bỏ ảnh ${file.name}`} onClick={() => setRoomImages((files) => files.filter((_, itemIndex) => itemIndex !== index))}>Bỏ</button></div>)}</div>}
+                {imageProgress && <p className="field-hint" role="status">{imageProgress}</p>}
+            </form>
         </Drawer>
     </>;
 }
