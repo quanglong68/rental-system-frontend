@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
-import { homeFor, useAuth, type Role } from "@/features/auth";
+import { hasAnyRole, homeFor, useAuth, type Role } from "@/features/auth";
 import { canAccessAdminSection } from "@/app/router/adminRouteAccess";
 
 export function RequireRole({ roles, children }: { roles: readonly Role[]; children: ReactNode }) {
@@ -9,13 +9,13 @@ export function RequireRole({ roles, children }: { roles: readonly Role[]; child
 
   if (initializing) return null;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
-  if (!roles.includes(user.role)) return <Navigate to={homeFor(user.role)} replace />;
+  if (!hasAnyRole(user, roles)) return <Navigate to={homeFor(user.role)} replace />;
   return <>{children}</>;
 }
 
 export function RequireAdminSection({ section, children }: { section: string; children: ReactNode }) {
   const { user, initializing } = useAuth();
   if (initializing) return null;
-  if (!user || !canAccessAdminSection(user.role, section)) return <Navigate to={user ? homeFor(user.role) : "/login"} replace />;
+  if (!user || !canAccessAdminSection(user.roles, section)) return <Navigate to={user ? homeFor(user.role) : "/login"} replace />;
   return <>{children}</>;
 }

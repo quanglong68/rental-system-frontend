@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, Field, Icon, PageHead, Pill, toVNTime, useToast, type Tone } from "@/shared/ui";
-import { useAuth } from "@/features/auth";
+import { hasAnyRole, useAuth } from "@/features/auth";
 import { getMyProfile, getStaff, type UserProfile } from "@/api/userNotification";
+import { fetchPagedHistory } from "@/api/pagedHistory";
 import {
   assetApi,
   type MaintenanceReport,
@@ -24,8 +25,12 @@ const prioLabel: Record<string, string> = {
 
 export default function Maintenance() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
-  const isTech = user?.role === "KY_THUAT";
+  const isAdmin = hasAnyRole(user, ["ADMIN"]);
+  const isTech = hasAnyRole(user, ["KY_THUAT"]);
+  const isSale = hasAnyRole(user, ["SALE"]);
+  // SALE được đọc báo hỏng trong building scope; chỉ QUAN_LY/ADMIN được duyệt/từ chối.
+  const canReadReports = hasAnyRole(user, ["QUAN_LY", "SALE", "ADMIN"]);
+  const canManageReports = hasAnyRole(user, ["QUAN_LY", "ADMIN"]);
 
   const [availableBuildings, setAvailableBuildings] = useState<number[]>([]);
   const [buildingId, setBuildingId] = useState<number | null>(null);
@@ -37,6 +42,7 @@ export default function Maintenance() {
   const [loading, setLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [requestsError, setRequestsError] = useState<string | null>(null);
+  const [requestsPartial, setRequestsPartial] = useState(false);
 
   const [pendingReports, setPendingReports] = useState<MaintenanceReport[]>([]);
   const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
@@ -84,7 +90,7 @@ export default function Maintenance() {
             const pos = (s.position || "").toUpperCase();
             return pos.includes("KY_THUAT") || pos.includes("KỸ THUẬT");
           });
-        } else if (bList.length > 0) {
+        } else if (canManageReports && bList.length > 0) {
           // Lấy kỹ thuật viên cho từng tòa được phân công, gộp theo ID
           const staffMap = new Map<number, UserProfile>();
           await Promise.all(
@@ -132,7 +138,7 @@ export default function Maintenance() {
     } finally {
       setLoadingBuildings(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, canManageReports]);
 
   useEffect(() => {
     void loadBuildings();
@@ -160,15 +166,17 @@ export default function Maintenance() {
     setLoading(true);
     setReportsError(null);
     setRequestsError(null);
+    setRequestsPartial(false);
 
     const promises: Promise<void>[] = [];
 
-    // Chỉ tải báo hỏng nếu có quyền QUAN_LY / ADMIN (endpoint /api/v1/reports cấm KY_THUAT)
-    if (!isTech) {
+    // QUAN_LY/SALE/ADMIN được đọc /api/v1/reports trong scope; KY_THUAT không gọi endpoint này.
+    if (canReadReports) {
       promises.push(
-        assetApi
-          .reports(buildingId, "PENDING")
-          .then((data) => setPendingReports(data || []))
+        fetchPagedHistory(
+          (page, size) => assetApi.reportsPage(buildingId, "PENDING", page, size),
+        )
+          .then((history) => setPendingReports(history.items))
           .catch((err) => {
             setReportsError(err instanceof Error ? err.message : "Không thể tải báo hỏng từ máy chủ.");
             setPendingReports([]);
@@ -179,18 +187,23 @@ export default function Maintenance() {
     }
 
     promises.push(
-      assetApi
-        .requests(`?buildingId=${buildingId}&size=100`)
-        .then((data) => setRequests(data || []))
+      fetchPagedHistory(
+        (page, size) => assetApi.requestsPage(`?buildingId=${buildingId}&page=${page}&size=${size}`),
+      )
+        .then((history) => {
+          setRequests(history.items);
+          setRequestsPartial(!history.complete);
+        })
         .catch((err) => {
           setRequestsError(err instanceof Error ? err.message : "Không thể tải danh sách phiếu bảo trì.");
           setRequests([]);
+          setRequestsPartial(false);
         })
     );
 
     await Promise.allSettled(promises);
     setLoading(false);
-  }, [buildingId, isTech]);
+  }, [buildingId, canReadReports]);
 
   useEffect(() => {
     void loadData();
@@ -198,7 +211,7 @@ export default function Maintenance() {
 
   const handleApprove = async () => {
     if (!selectedReport) return;
-    if (isTech) {
+    if (!canManageReports) {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền duyệt báo hỏng.");
       return;
     }
@@ -230,7 +243,7 @@ export default function Maintenance() {
 
   const handleReject = async () => {
     if (!selectedReport) return;
-    if (isTech) {
+    if (!canManageReports) {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền từ chối báo hỏng.");
       return;
     }
@@ -264,7 +277,9 @@ export default function Maintenance() {
         desc={
           isTech
             ? "Danh sách phiếu bảo trì kỹ thuật được phân công theo tòa nhà."
-            : "Tiếp nhận báo hỏng từ khách thuê và quy trình xử lý theo kỹ thuật viên từng tòa nhà."
+            : isSale
+              ? "Xem báo hỏng và phiếu bảo trì trong tòa nhà được phân công. Vai trò SALE chỉ đọc."
+              : "Tiếp nhận báo hỏng từ khách thuê và quy trình xử lý theo kỹ thuật viên từng tòa nhà."
         }
         actions={
           <div className="flex items-center gap-2">
@@ -348,19 +363,21 @@ export default function Maintenance() {
               Lỗi tải phiếu bảo trì: {requestsError}
             </div>
           )}
-          {reportsError && !isTech && (
+          {reportsError && canReadReports && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-700">
               Lỗi tải báo hỏng: {reportsError}
             </div>
           )}
 
-          <div className={`kanban ${isTech ? "!grid-cols-3" : ""}`}>
-            {/* Cột Báo hỏng mới tiếp nhận chỉ hiển thị cho QUAN_LY / ADMIN */}
-            {!isTech && (
+          {requestsPartial && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">Chỉ tải được một phần danh sách phiếu bảo trì.</div>}
+          <div className={`kanban ${canReadReports ? "" : "!grid-cols-3"}`}>
+            {/* Cột Báo hỏng mới tiếp nhận: QUAN_LY/SALE/ADMIN được đọc, chỉ QUAN_LY/ADMIN được xử lý */}
+            {canReadReports && (
               <section className="kanban-col">
                 <header>
                   <span className="dot dot-coral" />
                   <b>Mới tiếp nhận</b>
+                  {!canManageReports && <Pill tone="slate">Chỉ đọc</Pill>}
                   <span className="ml-auto text-xs font-bold text-muted">
                     {reportsError ? "!" : pendingReports.length}
                   </span>
@@ -388,12 +405,16 @@ export default function Maintenance() {
                         Phòng #{r.roomId}
                       </div>
                       <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
-                        <button
-                          className="text-button font-bold text-teal"
-                          onClick={() => setSelectedReport(r)}
-                        >
-                          Phân công <Icon name="arrow" size={12} />
-                        </button>
+                        {canManageReports ? (
+                          <button
+                            className="text-button font-bold text-teal"
+                            onClick={() => setSelectedReport(r)}
+                          >
+                            Phân công <Icon name="arrow" size={12} />
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-muted">Chỉ đọc</span>
+                        )}
                         <span className="text-muted">{toVNTime(r.createdAt, true)}</span>
                       </div>
                     </article>
@@ -527,7 +548,7 @@ export default function Maintenance() {
       )}
 
       {/* Drawer phê duyệt & phân công báo hỏng (chỉ mở cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageReports && (
         <Drawer
           open={!!selectedReport}
           eyebrow={selectedReport ? `Báo hỏng #${selectedReport.id}` : ""}

@@ -51,6 +51,7 @@ export type MaintenanceSchedule = {
 const content = <T,>(value: PageResult<T>) => value.content;
 const pageQuery = (page: number, size: number) => `?page=${page}&size=${size}`;
 export const assetApi = {
+    appliancesPage: (params = "") => apiFetch<PageResult<Appliance>>(`/api/v1/appliances${params}`),
     appliances: async (params = "") => content(await apiFetch<PageResult<Appliance>>(`/api/v1/appliances${params}`)),
     createAppliance: (body: {
         roomId: number;
@@ -67,6 +68,8 @@ export const assetApi = {
         endDate: string
     }) => apiFetch<Appliance>(`/api/v1/appliances/${id}/warranty`, {method: "PUT", body}),
     deleteAppliance: (id: number) => apiFetch<void>(`/api/v1/appliances/${id}`, {method: "DELETE"}),
+    reportsPage: (buildingId: number, status: string | undefined, page: number, size: number) =>
+        apiFetch<PageResult<MaintenanceReport>>(`/api/v1/reports?buildingId=${buildingId}${status ? `&status=${status}` : ""}&page=${page}&size=${size}`),
     reports: async (buildingId: number, status?: string) => content(await apiFetch<PageResult<MaintenanceReport>>(`/api/v1/reports?buildingId=${buildingId}${status ? `&status=${status}` : ""}`)),
     myReportsPage: (page = 0, size = 20) => apiFetch<PageResult<MaintenanceReport>>(`/api/v1/reports/mine${pageQuery(page, size)}`),
     myRequestsPage: (page = 0, size = 20) => apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests/mine${pageQuery(page, size)}`),
@@ -98,6 +101,7 @@ export const assetApi = {
         method: "PUT",
         body: {reason}
     }),
+    requestsPage: (params = "") => apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests${params}`),
     requests: async (params = "") => content(await apiFetch<PageResult<MaintenanceRequest>>(`/api/v1/maintenance-requests${params}`)),
     assign: (id: number, body: {
         staffId: number;

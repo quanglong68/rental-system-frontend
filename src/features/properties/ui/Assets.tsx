@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, todayVN, useToast, type Tone } from "@/shared/ui";
 import { useAuth } from "@/features/auth";
 import { getMyProfile, getStaff, type UserProfile } from "@/api/userNotification";
+import { fetchPagedHistory } from "@/api/pagedHistory";
 import {
   assetApi,
   type Appliance,
@@ -25,11 +26,12 @@ export default function Assets() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const isTech = user?.role === "KY_THUAT";
-  const canManageReports = user?.role === "QUAN_LY" || isAdmin;
+  const canManageAssets = user?.role === "QUAN_LY" || isAdmin;
+  const canManageReports = canManageAssets;
 
-  // Đặc tả 9.6: SALE không duyệt report; chỉ được đọc theo building scope.
-  const availableTabs = isTech ? ["Thiết bị", "Định kỳ"] : ["Báo hỏng", "Thiết bị", "Định kỳ"];
-  const [tab, setTab] = useState(isTech ? "Thiết bị" : "Báo hỏng");
+  // Đặc tả 9.6: chỉ QUAN_LY/ADMIN xem và xử lý báo hỏng; SALE chỉ đọc thiết bị/lịch trong scope.
+  const availableTabs = canManageReports ? ["Báo hỏng", "Thiết bị", "Định kỳ"] : ["Thiết bị", "Định kỳ"];
+  const [tab, setTab] = useState(canManageReports ? "Báo hỏng" : "Thiết bị");
 
   const [availableBuildings, setAvailableBuildings] = useState<number[]>([]);
   const [buildingId, setBuildingId] = useState<number | null>(null);
@@ -42,10 +44,12 @@ export default function Assets() {
   const [reports, setReports] = useState<MaintenanceReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
+  const [reportsPartial, setReportsPartial] = useState(false);
 
   const [appliances, setAppliances] = useState<Appliance[]>([]);
   const [loadingAppliances, setLoadingAppliances] = useState(false);
   const [appliancesError, setAppliancesError] = useState<string | null>(null);
+  const [appliancesPartial, setAppliancesPartial] = useState(false);
 
   const [schedules, setSchedules] = useState<MaintenanceSchedule[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
@@ -201,35 +205,45 @@ export default function Assets() {
   }, [buildingId, allTechnicians]);
 
   const loadReports = useCallback(async () => {
-    if (isTech || buildingId == null) {
+    if (!canManageReports || buildingId == null) {
       setReports([]);
       setReportsError(null);
+      setReportsPartial(false);
       return;
     }
     setLoadingReports(true);
     setReportsError(null);
+    setReportsPartial(false);
     try {
-      const data = await assetApi.reports(buildingId);
-      setReports(data || []);
+      const history = await fetchPagedHistory(
+        (page, size) => assetApi.reportsPage(buildingId, undefined, page, size),
+      );
+      setReports(history.items);
+      setReportsPartial(!history.complete);
     } catch (err) {
       setReportsError(err instanceof Error ? err.message : "Không thể tải danh sách báo hỏng từ máy chủ.");
       setReports([]);
     } finally {
       setLoadingReports(false);
     }
-  }, [buildingId, isTech]);
+  }, [buildingId, canManageReports]);
 
   const loadAppliances = useCallback(async () => {
     if (buildingId == null) {
       setAppliances([]);
       setAppliancesError(null);
+      setAppliancesPartial(false);
       return;
     }
     setLoadingAppliances(true);
     setAppliancesError(null);
+    setAppliancesPartial(false);
     try {
-      const data = await assetApi.appliances(`?buildingId=${buildingId}&size=100`);
-      setAppliances(data || []);
+      const history = await fetchPagedHistory(
+        (page, size) => assetApi.appliancesPage(`?buildingId=${buildingId}&page=${page}&size=${size}`),
+      );
+      setAppliances(history.items);
+      setAppliancesPartial(!history.complete);
     } catch (err) {
       setAppliancesError(err instanceof Error ? err.message : "Không thể tải danh mục thiết bị từ máy chủ.");
       setAppliances([]);
@@ -320,7 +334,7 @@ export default function Assets() {
   };
 
   const handleCreateAppliance = async () => {
-    if (isTech) {
+    if (!canManageAssets) {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền thêm thiết bị.");
       return;
     }
@@ -348,7 +362,7 @@ export default function Assets() {
   };
 
   const handleSaveWarranty = async () => {
-    if (isTech) {
+    if (!canManageAssets) {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền cập nhật bảo hành.");
       return;
     }
@@ -374,7 +388,7 @@ export default function Assets() {
   };
 
   const handleUpdateAppliance = async () => {
-    if (isTech || !editingAppliance) return;
+    if (!canManageAssets || !editingAppliance) return;
     if (!editApplianceName.trim()) {
       show("Vui lòng nhập tên thiết bị.");
       return;
@@ -396,7 +410,7 @@ export default function Assets() {
   };
 
   const handleDeleteAppliance = async (id: number) => {
-    if (isTech) return;
+    if (!canManageAssets) return;
     if (!window.confirm("Bạn có chắc chắn muốn xóa thiết bị này?")) return;
     setDeletingApplianceId(id);
     try {
@@ -411,7 +425,7 @@ export default function Assets() {
   };
 
   const handleCreateSchedule = async () => {
-    if (isTech || buildingId == null) return;
+    if (!canManageAssets || buildingId == null) return;
     if (!newScheduleTitle.trim() || !newScheduleStaffId || !newScheduleFirstDate) {
       show("Vui lòng nhập tiêu đề, kỹ thuật viên và ngày bắt đầu.");
       return;
@@ -440,7 +454,7 @@ export default function Assets() {
   };
 
   const handleUpdateSchedule = async () => {
-    if (isTech || !editingSchedule) return;
+    if (!canManageAssets || !editingSchedule) return;
     if (!editScheduleTitle.trim() || !editScheduleStaffId || !editScheduleNextDate) {
       show("Vui lòng nhập đầy đủ thông tin lịch bảo trì.");
       return;
@@ -465,7 +479,7 @@ export default function Assets() {
   };
 
   const handleDeleteSchedule = async (id: number) => {
-    if (isTech) return;
+    if (!canManageAssets) return;
     if (!window.confirm("Bạn có chắc chắn muốn xóa lịch bảo trì này?")) return;
     setDeletingScheduleId(id);
     try {
@@ -533,12 +547,12 @@ export default function Assets() {
               </span>
             )}
             <Tabs items={availableTabs} value={tab} onChange={setTab} />
-            {!isTech && tab === "Thiết bị" && (
+            {canManageAssets && tab === "Thiết bị" && (
               <button className="primary-button" onClick={() => setAddingAppliance(true)}>
                 <Icon name="plus" size={16} /> Thêm thiết bị
               </button>
             )}
-            {!isTech && tab === "Định kỳ" && (
+            {canManageAssets && tab === "Định kỳ" && (
               <button
                 className="primary-button"
                 disabled={buildingId == null}
@@ -616,7 +630,7 @@ export default function Assets() {
               note="Cần kiểm tra"
               tone="coral"
             />
-            {!isTech && (
+            {canManageReports && (
               <MiniStat
                 label="Báo hỏng chờ duyệt"
                 value={reportsError ? "!" : String(pendingReports.length)}
@@ -626,7 +640,7 @@ export default function Assets() {
             )}
           </section>
 
-          {tab === "Báo hỏng" && !isTech && (
+          {tab === "Báo hỏng" && canManageReports && (
             <article className="panel">
               <div className="panel-header">
                 <div>
@@ -634,6 +648,7 @@ export default function Assets() {
                   <p>{canManageReports ? "Xem ảnh, duyệt yêu cầu, gắn thiết bị và phân công kỹ thuật" : "Xem báo hỏng trong phạm vi tòa nhà được phân công"}</p>
                 </div>
               </div>
+              {reportsPartial && <div className="mx-4 mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Chỉ tải được một phần danh sách báo hỏng.</div>}
               {loadingReports ? (
                 <div className="p-10 text-center text-sm text-muted">Đang tải báo hỏng…</div>
               ) : reportsError ? (
@@ -688,6 +703,7 @@ export default function Assets() {
           {tab === "Thiết bị" && (
             <article className="panel">
               <Toolbar placeholder="Tìm tên thiết bị, mã phòng..." value={query} onChange={(e) => setQuery(e.target.value)} />
+              {appliancesPartial && <div className="mx-4 mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Chỉ tải được một phần danh mục thiết bị.</div>}
               {loadingAppliances ? (
                 <div className="p-10 text-center text-sm text-muted">Đang tải danh mục thiết bị…</div>
               ) : appliancesError ? (
@@ -708,7 +724,7 @@ export default function Assets() {
                         <th>Vị trí phòng</th>
                         <th>Tình trạng</th>
                         <th>Bảo hành</th>
-                        {!isTech && <th></th>}
+                        {canManageAssets && <th></th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -734,7 +750,7 @@ export default function Assets() {
                               <span className="text-muted">Chưa cập nhật</span>
                             )}
                           </td>
-                          {!isTech && (
+                          {canManageAssets && (
                             <td className="text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-2">
                                 <button
@@ -811,7 +827,7 @@ export default function Assets() {
                       <span>Kế tiếp: <b className="text-ink">{toVNTime(s.nextDate)}</b></span>
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
-                      {(!isTech || (user?.id && s.staffId === Number(user.id))) && (
+                      {(canManageAssets || (isTech && user?.id && s.staffId === Number(user.id))) && (
                         <button
                           className="primary-button !py-1 !px-3 text-xs"
                           disabled={completingScheduleId === s.id}
@@ -820,7 +836,7 @@ export default function Assets() {
                           {completingScheduleId === s.id ? "Đang hoàn tất…" : "Hoàn tất bảo trì"}
                         </button>
                       )}
-                      {!isTech && (
+                      {canManageAssets && (
                         <>
                           <button
                             className="secondary-button !py-1 !px-3 text-xs"
@@ -965,7 +981,7 @@ export default function Assets() {
       )}
 
       {/* Drawer thêm thiết bị (chỉ dành cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageAssets && (
         <Drawer
           open={addingAppliance}
           eyebrow="Tài sản"
@@ -1020,7 +1036,7 @@ export default function Assets() {
       )}
 
       {/* Drawer bảo hành (chỉ dành cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageAssets && (
         <Drawer
           open={!!warrantyAppliance}
           eyebrow="Bảo hành"
@@ -1070,7 +1086,7 @@ export default function Assets() {
       )}
 
       {/* Drawer sửa thiết bị (chỉ dành cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageAssets && (
         <Drawer
           open={!!editingAppliance}
           eyebrow="Tài sản"
@@ -1119,7 +1135,7 @@ export default function Assets() {
       )}
 
       {/* Drawer thêm lịch bảo trì định kỳ (chỉ dành cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageAssets && (
         <Drawer
           open={addingSchedule}
           eyebrow="Định kỳ"
@@ -1209,7 +1225,7 @@ export default function Assets() {
       )}
 
       {/* Drawer sửa lịch bảo trì định kỳ (chỉ dành cho QUAN_LY / ADMIN) */}
-      {!isTech && (
+      {canManageAssets && (
         <Drawer
           open={!!editingSchedule}
           eyebrow="Định kỳ"

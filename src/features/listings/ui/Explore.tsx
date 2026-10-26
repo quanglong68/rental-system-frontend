@@ -1,11 +1,8 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "motion/react";
 import { Icon, vnd } from "@/shared/ui";
-import { useNavigate } from "react-router";
 import { areas, buildings, roomTypes, rooms, type Room } from "@/features/listings";
 import { haversine, HCM_CENTER } from "@/shared/lib/geo";
-import { useAuth } from "@/features/auth";
-import { bookingStore, slotHours, upcomingDays, vnToIso } from "@/features/bookings";
 
 type R = Room & { km: number };
 const withKm: R[] = rooms.filter((r) => r.status === "ACTIVE").map((r) => ({ ...r, km: Math.round(haversine(HCM_CENTER, r) * 10) / 10 }));
@@ -44,18 +41,6 @@ function TiltCard({ room, i, gps, onOpen }: { room: R; i: number; gps: boolean; 
 }
 
 function RoomSheet({ room, onClose }: { room: R; onClose: () => void }) {
-  const [sent, setSent] = useState(false);
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [picking, setPicking] = useState(false);
-  const days = useMemo(() => upcomingDays(5), []);
-  const [day, setDay] = useState(days[0].ymd);
-  const [slot, setSlot] = useState("");
-  const request = () => (sent ? navigate("/requests") : user ? setPicking(true) : navigate("/login?next=/"));
-  const confirm = () => {
-    bookingStore.addRequest({ room: room.code, building: room.building, price: room.price, at: new Date().toISOString() }, vnToIso(day, slot));
-    setPicking(false); setSent(true);
-  };
   return (
     <>
       <motion.div className="cx-scrim" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
@@ -76,32 +61,14 @@ function RoomSheet({ room, onClose }: { room: R; onClose: () => void }) {
             <div><dt>Khoảng cách</dt><dd>{room.km.toLocaleString("vi-VN")} km</dd></div>
           </dl>
           <p className="text-sm leading-7 text-[#56636a]">Điện {vnd(3500)}/kWh · Nước {vnd(18000)}/m³. Hóa đơn hằng tháng tự động chia đều theo số người ở trong phòng.</p>
-          <div className="mt-6 grid grid-cols-2 gap-3">
-            <button className="cx-btn ghost" onClick={() => (user ? setPicking(true) : navigate("/login?next=/"))}>Đặt lịch xem</button>
-            <motion.button className="cx-btn" whileTap={{ scale: 0.96 }} onClick={request}>
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.span key={String(sent)} initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -12, opacity: 0 }} className="flex items-center gap-2">
-                  {sent ? <><Icon name="check" size={16} /> Đã gửi · xem lịch hẹn</> : "Gửi yêu cầu thuê"}
-                </motion.span>
-              </AnimatePresence>
-            </motion.button>
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            Phòng đang hiển thị từ dữ liệu minh họa. Chưa kết nối listing-booking-service nên đặt lịch xem
+            và gửi yêu cầu thuê đang tạm khóa.
           </div>
-          <AnimatePresence>
-            {picking && !sent && (
-              <motion.div className="cx-panel mt-5" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} transition={{ duration: 0.4, ease }}>
-                <h3 className="cx-panel-title">Chọn khung giờ xem phòng</h3>
-                <div className="cx-chips">{days.map((d) => <button key={d.ymd} className={`cx-chip ${day === d.ymd ? "on" : ""}`} onClick={() => { setDay(d.ymd); setSlot(""); }}>{d.label}</button>)}</div>
-                <div className="cx-slots">
-                  {slotHours.map((h, i) => <button key={h} className={slot === h ? "on" : ""} disabled={(i + day.charCodeAt(9)) % 4 === 0} onClick={() => setSlot(h)}>{h}</button>)}
-                </div>
-                <p className="mt-3 text-xs text-[#6b777d]">Nhân viên sẽ gọi xác nhận trong 2 giờ. Bạn có thể hủy trong mục Lịch hẹn.</p>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button className="cx-btn ghost !h-11" onClick={() => setPicking(false)}>Để sau</button>
-                  <button className="cx-btn !h-11" disabled={!slot} onClick={confirm}>Xác nhận {slot && `${slot}`}</button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <button className="cx-btn ghost opacity-50" disabled title="Chưa kết nối listing-booking-service">Đặt lịch xem</button>
+            <button className="cx-btn opacity-50" disabled title="Chưa kết nối listing-booking-service">Gửi yêu cầu thuê</button>
+          </div>
         </div>
       </motion.aside>
     </>
@@ -145,6 +112,15 @@ export default function Explore() {
           <motion.p className="cx-lead" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55, duration: 0.6 }}>
             Chọn một tòa nhà, xem ngay các phòng còn trống, giá thuê và bố cục nội thất 3D, không cần đến tận nơi.
           </motion.p>
+          <motion.div
+            className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.6 }}
+          >
+            <b>Dữ liệu minh họa.</b> Danh sách phòng chưa kết nối property-service/listing-booking-service;
+            đặt lịch xem và gửi yêu cầu thuê đang tạm khóa.
+          </motion.div>
           <motion.div className="cx-switch" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7, duration: 0.6 }}>
             {buildings.map((x) => (
               <button key={x.key} onClick={() => setB(x)} className={b.key === x.key ? "on" : ""}>

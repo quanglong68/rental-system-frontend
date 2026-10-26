@@ -4,15 +4,30 @@ import type { LoginResponse, MeResponse, RegisterResponse, Role, User } from "./
 
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
 
-/** roles BE -> Role FE (ưu tiên ADMIN > QUAN_LY > KY_THUAT > SALE). */
+/**
+ * roles BE -> Role FE đại diện cho điều hướng/nhãn (ưu tiên ADMIN > QUAN_LY > KY_THUAT > SALE).
+ * Chỉ role thật trong token/`/me` mới được dùng; accountType không tự nâng quyền ADMIN.
+ * Đây không phải nguồn quyền duy nhất: kiểm tra thao tác phải dùng `hasAnyRole`.
+ */
 export function mapRole(accountType: string, roles: string[] | undefined): Role {
   const set = new Set((roles ?? []).map((r) => r.toUpperCase()));
-  if (set.has("ADMIN") || accountType === "ADMIN") return "ADMIN";
+  if (set.has("ADMIN")) return "ADMIN";
   if (set.has("QUAN_LY")) return "QUAN_LY";
   if (set.has("KY_THUAT")) return "KY_THUAT";
   if (set.has("SALE")) return "SALE";
   if (accountType === "CUSTOMER" && (set.size === 0 || set.has("CUSTOMER"))) return "CUSTOMER";
   return "UNKNOWN";
+}
+
+/**
+ * Kiểm tra quyền thao tác trên danh sách role thật từ server.
+ * Không dùng `user.role` đại diện để tránh biến role ưu tiên thành quyền ngầm.
+ */
+export function hasAnyRole(
+  user: Pick<User, "roles"> | null | undefined,
+  allowed: readonly string[],
+): boolean {
+  return !!user?.roles.some((role) => allowed.includes(role));
 }
 
 export function toUser(
@@ -22,7 +37,14 @@ export function toUser(
   roles: string[] | undefined,
   fullName?: string,
 ): User {
-  return { id: accountId, sub: username, fullName: fullName?.trim() || username, role: mapRole(accountType, roles) };
+  const normalizedRoles = Array.from(new Set((roles ?? []).map((r) => r.toUpperCase())));
+  return {
+    id: accountId,
+    sub: username,
+    fullName: fullName?.trim() || username,
+    role: mapRole(accountType, normalizedRoles),
+    roles: normalizedRoles,
+  };
 }
 
 export type RegisterInput = { fullName: string; username: string; password: string };

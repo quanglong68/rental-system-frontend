@@ -84,6 +84,8 @@ export const contractsApi = {
   list: async (params: { buildingId?: number; roomId?: number; status?: ContractStatus; page?: number; size?: number }) =>
     toPage(await apiFetch<RawPage<Contract>>(`/api/v1/contracts${qs(params)}`)),
   detail: (id: number) => apiFetch<ContractDetail>(`/api/v1/contracts/${id}`),
+  updateDraft: (id: number, body: { startDate: string; endDate: string | null; rentAmount: number; depositAmount: number | null }) =>
+    apiFetch<Contract>(`/api/v1/contracts/${id}`, { method: "PUT", body }),
   sign: (id: number) => apiFetch<Contract>(`/api/v1/contracts/${id}/sign`, { method: "POST" }),
   renew: (id: number, newEndDate: string) =>
     apiFetch<Contract>(`/api/v1/contracts/${id}/renew`, { method: "POST", body: { newEndDate } }),

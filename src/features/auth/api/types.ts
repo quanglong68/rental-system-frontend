@@ -8,7 +8,15 @@ export type AccountType = "CUSTOMER" | "STAFF" | "ADMIN";
  * `id` là accountId từ MeResponse/LoginAccountInfo; backend dùng chính nó làm customerId
  * (JWT `sub`), nên so sánh được với `ContractTenant.customerId`.
  */
-export type User = { id: number; sub: string; fullName: string; role: Role; buildings?: string[] };
+export type User = {
+  id: number;
+  sub: string;
+  fullName: string;
+  role: Role;
+  /** Toàn bộ role thật từ JWT/MeResponse; dùng cho kiểm tra quyền thay vì role đại diện. */
+  roles: string[];
+  buildings?: string[];
+};
 
 export type LoginAccountInfo = {
   id: number;
