@@ -1,21 +1,27 @@
-import {useEffect, useState} from "react";
-import {Link, Navigate, useParams} from "react-router";
-import {PageHead, Pill, Tabs, vnd} from "@/shared/ui";
+import {useEffect, useState, type FormEvent} from "react";
+import {Link, Navigate, useNavigate, useParams} from "react-router";
+import {Drawer, Field, PageHead, Pill, Tabs, vnd} from "@/shared/ui";
 import {
     propertyApi,
     type Building,
     type OccupancySummary,
     type Occupant,
     type Page,
-    type Room
+    type Room,
+    type RoomImage,
+    type RoomPrice,
+    type RoomType
 } from "@/features/properties/api/propertyApi";
 import PropertyBreadcrumbs from "./PropertyBreadcrumbs";
 import {roomStatuses} from "./BuildingRoomsPage";
+import {usePropertyConfirm} from "./usePropertyConfirm";
 import "./property.css";
 
 const tabs = ["Tổng quan", "Người cư trú", "Hợp đồng", "Lịch sử"];
 export default function RoomDetailPage() {
     const {buildingId, roomId} = useParams();
+    const navigate = useNavigate();
+    const [confirmationPopup, confirm] = usePropertyConfirm();
     const [building, setBuilding] = useState<Building | null>(null);
     const [room, setRoom] = useState<Room | null>(null);
     const [summary, setSummary] = useState<OccupancySummary | null>(null);
@@ -27,6 +33,19 @@ export default function RoomDetailPage() {
     const [error, setError] = useState("");
     const [listError, setListError] = useState("");
     const [reload, setReload] = useState(0);
+    const [editing, setEditing] = useState(false);
+    const [roomForm, setRoomForm] = useState<Room | null>(null);
+    const [types, setTypes] = useState<RoomType[]>([]);
+    const [saving, setSaving] = useState(false);
+    const [formError, setFormError] = useState("");
+    const [prices, setPrices] = useState<RoomPrice[]>([]);
+    const [currentPrice, setCurrentPrice] = useState<RoomPrice | null>(null);
+    const [price, setPrice] = useState("");
+    const [effectiveFrom, setEffectiveFrom] = useState(new Date().toLocaleDateString("sv-SE", {timeZone: "Asia/Ho_Chi_Minh"}));
+    const [priceError, setPriceError] = useState("");
+    const [images, setImages] = useState<RoomImage[]>([]);
+    const [imageError, setImageError] = useState("");
+    const [imageBusy, setImageBusy] = useState(false);
 
     useEffect(() => {
         if (!buildingId || !roomId) return;
@@ -60,13 +79,65 @@ export default function RoomDetailPage() {
         return () => controller.abort();
     }, [roomId, room, tab, page, reload]);
 
+    useEffect(() => {
+        if (!roomId || !room || tab !== "Tổng quan") return;
+        const controller = new AbortController();
+        propertyApi.roomPrices(roomId, controller.signal).then(setPrices).catch((cause) => { if (!controller.signal.aborted) setPriceError(cause instanceof Error ? cause.message : "Không tải được lịch sử giá."); });
+        propertyApi.roomImages(roomId, controller.signal).then((roomImages) => setImages(roomImages.sort((a, b) => a.displayOrder - b.displayOrder))).catch((cause) => { if (!controller.signal.aborted) setImageError(cause instanceof Error ? cause.message : "Không tải được ảnh phòng."); });
+        propertyApi.currentRoomPrice(roomId, undefined, controller.signal).then(setCurrentPrice).catch(() => { if (!controller.signal.aborted) setCurrentPrice(null); });
+        return () => controller.abort();
+    }, [roomId, room, tab, reload]);
+
+    const openEdit = async () => {
+        if (!room) return;
+        setRoomForm(room); setFormError(""); setEditing(true);
+        try { setTypes((await propertyApi.roomTypes()).content); } catch (cause) { setFormError(cause instanceof Error ? cause.message : "Không tải được loại phòng."); }
+    };
+    const saveRoom = async (event: FormEvent) => {
+        event.preventDefault(); if (!roomId || !roomForm) return;
+        setSaving(true); setFormError("");
+        try {
+            const {buildingId: roomBuildingId, roomTypeId, roomCode, maxCapacity, area, bedroomCount, bathroomCount, basePrice, status} = roomForm;
+            await propertyApi.updateRoom(roomId, {buildingId: roomBuildingId, roomTypeId, roomCode, maxCapacity, area, bedroomCount, bathroomCount, basePrice, status});
+            setEditing(false); setReload((value) => value + 1);
+        } catch (cause) { setFormError(cause instanceof Error ? cause.message : "Không cập nhật được phòng."); } finally { setSaving(false); }
+    };
+    const removeRoom = async () => {
+        if (!roomId || !room || !await confirm({title: "Xóa phòng", message: `Bạn có chắc muốn xóa phòng ${room.roomCode}?`, confirmLabel: "Xóa phòng"})) return;
+        try { await propertyApi.deleteRoom(roomId); navigate(`/admin/buildings/${buildingId}/rooms`, {replace: true}); }
+        catch (cause) { setError(cause instanceof Error ? cause.message : "Không xóa được phòng."); }
+    };
+    const setNewPrice = async (event: FormEvent) => {
+        event.preventDefault(); if (!roomId) return;
+        setPriceError("");
+        try { await propertyApi.setRoomPrice(roomId, Number(price), effectiveFrom); setPrice(""); setPrices(await propertyApi.roomPrices(roomId)); setCurrentPrice(await propertyApi.currentRoomPrice(roomId)); }
+        catch (cause) { setPriceError(cause instanceof Error ? cause.message : "Không cập nhật được giá."); }
+    };
+    const refreshImages = async () => setImages((await propertyApi.roomImages(roomId!)).sort((a, b) => a.displayOrder - b.displayOrder));
+    const uploadImage = async (file?: File) => {
+        if (!file || !roomId) return; setImageBusy(true); setImageError("");
+        try { await propertyApi.uploadRoomImage(roomId, file); await refreshImages(); }
+        catch (cause) { setImageError(cause instanceof Error ? cause.message : "Không tải được ảnh."); } finally { setImageBusy(false); }
+    };
+    const updateImage = async (image: RoomImage, patch: Partial<Pick<RoomImage, "displayOrder" | "primaryImage">>) => {
+        if (!roomId) return; setImageBusy(true); setImageError("");
+        try { await propertyApi.updateRoomImage(roomId, image.imageId, patch); await refreshImages(); }
+        catch (cause) { setImageError(cause instanceof Error ? cause.message : "Không cập nhật được ảnh."); } finally { setImageBusy(false); }
+    };
+    const removeImage = async (image: RoomImage) => {
+        if (!roomId || !await confirm({title: "Xóa ảnh phòng", message: "Bạn có chắc muốn gỡ ảnh này khỏi phòng?", confirmLabel: "Xóa ảnh"})) return;
+        setImageBusy(true); setImageError("");
+        try { await propertyApi.deleteRoomImage(roomId, image.imageId); await refreshImages(); }
+        catch (cause) { setImageError(cause instanceof Error ? cause.message : "Không xóa được ảnh."); } finally { setImageBusy(false); }
+    };
+
     if (!buildingId || !roomId) return <Navigate to="/admin/buildings" replace/>;
     return <>
+        {confirmationPopup}
         <PropertyBreadcrumbs building={building} room={room}/>
         <PageHead eyebrow="" title={room ? `Phòng ${room.roomCode}` : "Chi tiết phòng"}
                   desc={building ? `${building.name} · ${building.address}` : "Đang tải thông tin tòa nhà…"}
-                  actions={<Link className="secondary-button" to={`/admin/buildings/${buildingId}/rooms`}>Quay lại danh
-                      sách phòng</Link>}/>
+                  actions={<><Link className="secondary-button" to={`/admin/buildings/${buildingId}/rooms`}>Danh sách phòng</Link><button className="secondary-button" onClick={() => void openEdit()}>Sửa phòng</button><button className="danger-button" onClick={() => void removeRoom()}>Xóa phòng</button></>}/>
         {error && <div className="panel property-state" role="alert"><p>{error}</p>
             <button className="secondary-button" onClick={() => setReload((value) => value + 1)}>Thử lại</button>
         </div>}
@@ -78,7 +149,7 @@ export default function RoomDetailPage() {
                         tone={roomStatuses[room.status]?.tone ?? "slate"}>{roomStatuses[room.status]?.label ?? room.status}</Pill>
                     </div>
                 </div>
-                <div><span className="text-sm text-muted">Giá cơ bản</span><strong>{vnd(room.basePrice)}</strong></div>
+                <div><span className="text-sm text-muted">Giá hiện tại</span><strong>{vnd(currentPrice?.price ?? room.basePrice)}</strong></div>
                 <div><span className="text-sm text-muted">Diện tích</span><strong>{room.area} m²</strong></div>
                 <div><span className="text-sm text-muted">Sức chứa</span><strong>{room.maxCapacity} người</strong></div>
             </div>
@@ -87,7 +158,7 @@ export default function RoomDetailPage() {
                 setPage(0);
                 setOccupants(null);
             }}/>
-            {tab === "Tổng quan" &&
+            {tab === "Tổng quan" && <div className="room-detail-sections">
                 <section className="panel p-6"><h2 className="text-lg font-bold">Thông tin phòng</h2>
                     <dl className="property-details">
                         <div>
@@ -100,7 +171,7 @@ export default function RoomDetailPage() {
                         </div>
                         <div>
                             <dt>Loại phòng</dt>
-                            <dd>{room.roomTypeId}</dd>
+                            <dd>{types.find((type) => type.id === room.roomTypeId)?.name ?? room.roomTypeId}</dd>
                         </div>
                         <div>
                             <dt>Phòng ngủ</dt>
@@ -115,11 +186,17 @@ export default function RoomDetailPage() {
                             <dd>{room.maxCapacity} người</dd>
                         </div>
                     </dl>
-                </section>}
+                </section>
+                <section className="panel p-6"><div className="room-section-heading"><div><h2 className="text-lg font-bold">Ảnh phòng</h2><p className="text-sm text-muted">JPEG, PNG hoặc WebP, tối đa 5 MiB mỗi ảnh.</p></div><label className="secondary-button">Thêm ảnh<input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={imageBusy} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }}/></label></div>
+                    {imageError && <p className="field-error" role="alert">{imageError}</p>}{images.length === 0 && <p className="property-note">Chưa có ảnh phòng.</p>}
+                    <div className="room-image-grid">{images.map((image) => <figure key={image.imageId}><img src={image.imageUrl} alt={`Ảnh phòng ${room.roomCode}`} loading="lazy"/><figcaption>{image.primaryImage ? "Ảnh đại diện" : `Ảnh ${image.displayOrder + 1}`}</figcaption><div><button type="button" className="secondary-button" disabled={imageBusy || image.primaryImage} onClick={() => void updateImage(image, {primaryImage: true})}>Đặt ảnh đại diện</button><button type="button" className="danger-button" disabled={imageBusy} onClick={() => void removeImage(image)}>Xóa</button></div></figure>)}</div>
+                </section>
+                <section className="panel p-6"><h2 className="text-lg font-bold">Lịch sử giá</h2><form className="room-price-form" onSubmit={setNewPrice}><Field label="Giá mới (₫)"><input required type="number" min={0} value={price} onChange={(event) => setPrice(event.target.value)}/></Field><Field label="Ngày hiệu lực"><input required type="date" min={new Date().toLocaleDateString("sv-SE", {timeZone: "Asia/Ho_Chi_Minh"})} value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)}/></Field><button className="primary-button">Áp dụng giá</button></form>{priceError && <p className="field-error" role="alert">{priceError}</p>}{prices.length ? <div className="property-table-wrap"><table className="data-table"><thead><tr><th>Giá</th><th>Từ ngày</th><th>Đến ngày</th></tr></thead><tbody>{prices.map((item) => <tr key={item.id}><td>{vnd(item.price)}</td><td>{item.effectiveFrom}</td><td>{item.effectiveTo ?? "Đang áp dụng"}</td></tr>)}</tbody></table></div> : <p className="property-note">Chưa có lịch sử giá.</p>}</section>
+            </div>}
             {(tab === "Người cư trú" || tab === "Lịch sử") && <section className="panel">
                 <div className="property-toolbar"><h2
                     className="text-lg font-bold">{tab === "Lịch sử" ? "Lịch sử cư trú" : "Người cư trú hiện tại"}</h2>{summary && tab === "Người cư trú" &&
-                    <span className="text-sm text-muted">{summary.currentOccupants}/{summary.maxCapacity} người</span>}
+                    <div className="room-capacity"><span>{summary.currentOccupants}/{summary.maxCapacity} người · còn {summary.availableCapacity} chỗ</span><div role="progressbar" aria-label="Mức sử dụng sức chứa" aria-valuenow={summary.currentOccupants} aria-valuemin={0} aria-valuemax={summary.maxCapacity}><span className={summary.overCapacity ? "is-over-capacity" : ""} style={{width: `${Math.min(100, Math.max(0, summary.currentOccupants / summary.maxCapacity * 100))}%`}}/></div></div>}
                 </div>
                 {listError && <div className="property-state" role="alert"><p>{listError}</p>
                     <button className="secondary-button" onClick={() => setReload((value) => value + 1)}>Thử lại
@@ -161,5 +238,8 @@ export default function RoomDetailPage() {
                 <div className="panel property-state">Thông tin hợp đồng theo phòng chưa có API đọc được xác
                     nhận.</div>}
         </>}
+        <Drawer open={editing} title="Sửa thông tin phòng" onClose={() => setEditing(false)} footer={<><button className="secondary-button" onClick={() => setEditing(false)}>Hủy</button><button className="primary-button" form="room-edit-form" disabled={saving}>{saving ? "Đang lưu…" : "Lưu thay đổi"}</button></>}>
+            {roomForm && <form id="room-edit-form" className="property-form" onSubmit={saveRoom}><Field label="Mã phòng"><input required maxLength={50} value={roomForm.roomCode} onChange={(e) => setRoomForm({...roomForm, roomCode: e.target.value})}/></Field><Field label="Loại phòng"><select required value={roomForm.roomTypeId} onChange={(e) => setRoomForm({...roomForm, roomTypeId: e.target.value})}><option value="">Chọn loại phòng</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></Field><Field label="Sức chứa"><input required type="number" min={1} value={roomForm.maxCapacity} onChange={(e) => setRoomForm({...roomForm, maxCapacity: Number(e.target.value)})}/></Field><Field label="Diện tích (m²)"><input required type="number" min={0.01} step="any" value={roomForm.area} onChange={(e) => setRoomForm({...roomForm, area: Number(e.target.value)})}/></Field><Field label="Số phòng ngủ"><input required type="number" min={0} value={roomForm.bedroomCount} onChange={(e) => setRoomForm({...roomForm, bedroomCount: Number(e.target.value)})}/></Field><Field label="Số phòng tắm"><input required type="number" min={0} value={roomForm.bathroomCount} onChange={(e) => setRoomForm({...roomForm, bathroomCount: Number(e.target.value)})}/></Field><Field label="Giá cơ bản (₫)"><input required type="number" min={0} value={roomForm.basePrice} onChange={(e) => setRoomForm({...roomForm, basePrice: Number(e.target.value)})}/></Field><Field label="Trạng thái"><select value={roomForm.status} onChange={(e) => setRoomForm({...roomForm, status: e.target.value as Room["status"]})}><option value="VACANT">Phòng trống</option><option value="OCCUPIED">Đang thuê</option><option value="UPCOMING_VACANT">Sắp trống</option><option value="MAINTENANCE">Bảo trì</option></select></Field>{formError && <p className="field-error" role="alert">{formError}</p>}</form>}
+        </Drawer>
     </>;
 }

@@ -1,19 +1,21 @@
+import { usePropertyConfirm } from "./usePropertyConfirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Field, Icon } from "@/shared/ui";
-import { propertyApi, type BuildingInput, type Province, type Ward } from "@/features/properties/api/propertyApi";
+import { propertyApi, type BuildingInput, type BuildingStatus, type Province, type Ward } from "@/features/properties/api/propertyApi";
 import { isValidPoint, searchPlaces, type MapPoint, type PlaceResult } from "@/features/properties/api/geocodingApi";
 import BuildingLocationMap from "./BuildingLocationMap";
 import BuildingImagesSection, { type PendingBuildingImage } from "./BuildingImagesSection";
 import PropertyBreadcrumbs from "./PropertyBreadcrumbs";
 import "./property.css";
 
-type Draft = Pick<BuildingInput, "name" | "address" | "provinceId" | "wardId" | "description"> & { position: MapPoint | null };
-const emptyDraft: Draft = { name: "", address: "", provinceId: "", wardId: "", description: "", position: null };
+type Draft = Pick<BuildingInput, "name" | "address" | "provinceId" | "wardId" | "description"> & { position: MapPoint | null; buildingStatus: BuildingStatus };
+const emptyDraft: Draft = { name: "", address: "", provinceId: "", wardId: "", description: "", position: null, buildingStatus: "ACTIVE" };
 type FieldErrors = Partial<Record<"name" | "address" | "provinceId" | "wardId" | "position", string>>;
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : "Yêu cầu thất bại. Vui lòng thử lại.";
 
 export default function BuildingFormPage() {
+  const [confirmationPopup, confirm] = usePropertyConfirm();
   const { buildingId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,7 +60,7 @@ export default function BuildingFormPage() {
     const requests: Promise<unknown>[] = [propertyApi.provinces(controller.signal).then(setProvinces)];
     if (buildingId) requests.push(propertyApi.building(buildingId, controller.signal).then((building) => {
       const point = { latitude: building.latitude, longitude: building.longitude };
-      const next: Draft = { name: building.name, address: building.address, provinceId: building.provinceId, wardId: building.wardId, description: building.description, position: isValidPoint(point) ? point : null };
+      const next: Draft = { name: building.name, address: building.address, provinceId: building.provinceId, wardId: building.wardId, description: building.description, position: isValidPoint(point) ? point : null, buildingStatus: building.buildingStatus };
       setDraft(next); setInitial(JSON.stringify(next));
     }));
     Promise.all(requests).then(() => setLoaded(true)).catch((cause) => { if (!controller.signal.aborted) setLoadError(errorText(cause)); });
@@ -98,7 +100,7 @@ export default function BuildingFormPage() {
     if (!manualLat.trim() || !manualLng.trim() || !isValidPoint(point)) { setManualError("Nhập vĩ độ từ -90 đến 90 và kinh độ từ -180 đến 180."); return; }
     setPosition(point); setFocusKey((value) => value + 1); setManualOpen(false); setManualError("");
   };
-  const cancel = () => { if (!dirty || window.confirm("Bạn có thay đổi chưa lưu. Rời trang này?")) navigate("/admin/buildings"); };
+  const cancel = async () => { if (!dirty || await confirm({ title: "Rời trang khi chưa lưu?", message: "Bạn có thay đổi chưa lưu. Rời trang này?", confirmLabel: "Rời trang" })) navigate("/admin/buildings"); };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (savingRef.current) return;
@@ -115,7 +117,7 @@ export default function BuildingFormPage() {
     try {
       const position = draft.position!;
       if (!buildingId || JSON.stringify(draft) !== initial) {
-        const saved = await propertyApi.saveBuilding({ name: draft.name.trim(), address: draft.address.trim(), provinceId: draft.provinceId, wardId: draft.wardId, description: draft.description, latitude: position.latitude, longitude: position.longitude }, buildingId);
+        const saved = await propertyApi.saveBuilding({ name: draft.name.trim(), address: draft.address.trim(), provinceId: draft.provinceId, wardId: draft.wardId, description: draft.description, latitude: position.latitude, longitude: position.longitude, ...(buildingId ? { buildingStatus: draft.buildingStatus } : {}) }, buildingId);
         savedBuildingId = saved.buildingId;
       }
       for (let index = 0; index < pendingImages.length; index++) {
@@ -134,6 +136,7 @@ export default function BuildingFormPage() {
   };
 
   return <>
+    {confirmationPopup}
     <PropertyBreadcrumbs action={editing ? "Sửa tòa nhà" : "Thêm tòa nhà"}/>
     <header className="building-page-head"><div><h1 className="page-title">{editing ? "Sửa tòa nhà" : "Thêm tòa nhà"}</h1><p>Nhập thông tin và xác định vị trí trên bản đồ.</p></div></header>
     {loadError && <div className="panel property-state" role="alert"><p>{loadError}</p><button className="secondary-button" onClick={() => setLoadKey((value) => value + 1)}>Thử lại</button></div>}
@@ -149,6 +152,7 @@ export default function BuildingFormPage() {
             <Field label="Phường/xã *" error={fieldErrors.wardId}><select aria-required="true" value={draft.wardId} disabled={!draft.provinceId || wardsLoading} onChange={(event) => { setDraft({ ...draft, wardId: event.target.value }); setFieldErrors((current) => ({ ...current, wardId: undefined })); }}><option value="">{wardsLoading ? "Đang tải phường/xã…" : "Chọn phường/xã"}</option>{wards.map((item) => <option key={item.wardId} value={item.wardId}>{item.name}</option>)}</select></Field>
             {wardsError && <div className="property-location-error" role="alert"><span>{wardsError}</span><button type="button" className="secondary-button" onClick={() => setWardRetry((value) => value + 1)}>Thử tải lại</button></div>}
             <Field label="Mô tả"><textarea value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })}/></Field>
+            {editing && <Field label="Trạng thái tòa nhà"><select value={draft.buildingStatus} onChange={(event) => setDraft({ ...draft, buildingStatus: event.target.value as BuildingStatus })}><option value="ACTIVE">Đang hoạt động</option><option value="INACTIVE">Tạm ngừng</option><option value="MAINTENANCE">Đang bảo trì</option><option value="CLOSED">Đã đóng</option></select></Field>}
           </form>
         </section>
         <BuildingImagesSection buildingId={buildingId} pending={pendingImages} onPendingChange={setPendingImages} refreshKey={imagesRefreshKey} disabled={saving} uploadProgress={uploadProgress}/>
