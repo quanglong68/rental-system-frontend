@@ -1,6 +1,7 @@
 import {useEffect, useState, type FormEvent} from "react";
 import {Link, Navigate, useNavigate, useParams} from "react-router";
-import {Drawer, Field, PageHead, Pill, Tabs, vnd} from "@/shared/ui";
+import {Drawer, Field, PageHead, Pill, Tabs, vnd, formatMoneyInput, parseMoneyInput} from "@/shared/ui";
+import {hasAnyRole, useAuth} from "@/features/auth";
 import {
     propertyApi,
     type Building,
@@ -15,11 +16,22 @@ import {
 import PropertyBreadcrumbs from "./PropertyBreadcrumbs";
 import {roomStatuses} from "./BuildingRoomsPage";
 import {usePropertyConfirm} from "./usePropertyConfirm";
+import {contractsApi, type Contract} from "@/features/contracts/api/contractsApi";
+import {useCustomerLookup} from "@/shared/lib/refLabels";
 import "./property.css";
+
+const contractStatuses: Record<Contract["status"], {label: string; tone: "teal" | "amber" | "coral" | "slate"}> = {
+    DRAFT: {label: "Bản nháp", tone: "amber"},
+    ACTIVE: {label: "Đang hiệu lực", tone: "teal"},
+    TERMINATED: {label: "Đã chấm dứt", tone: "coral"},
+    ENDED: {label: "Đã kết thúc", tone: "slate"},
+};
 
 const tabs = ["Tổng quan", "Người cư trú", "Hợp đồng", "Lịch sử"];
 export default function RoomDetailPage() {
     const {buildingId, roomId} = useParams();
+    const {user} = useAuth();
+    const canManageRooms = hasAnyRole(user, ["ADMIN", "QUAN_LY"]);
     const navigate = useNavigate();
     const [confirmationPopup, confirm] = usePropertyConfirm();
     const [building, setBuilding] = useState<Building | null>(null);
@@ -46,6 +58,14 @@ export default function RoomDetailPage() {
     const [images, setImages] = useState<RoomImage[]>([]);
     const [imageError, setImageError] = useState("");
     const [imageBusy, setImageBusy] = useState(false);
+    const [contracts, setContracts] = useState<Contract[] | null>(null);
+    const [contractsLoading, setContractsLoading] = useState(false);
+    const [contractsError, setContractsError] = useState("");
+
+    const customerOf = useCustomerLookup([
+        ...(occupants?.content ?? []).map((person) => person.userId),
+        ...(contracts ?? []).map((contract) => contract.customerId),
+    ]);
 
     useEffect(() => {
         if (!buildingId || !roomId) return;
@@ -88,6 +108,31 @@ export default function RoomDetailPage() {
         return () => controller.abort();
     }, [roomId, room, tab, reload]);
 
+    useEffect(() => {
+        if (!roomId) return;
+        let cancelled = false;
+        propertyApi.roomTypes()
+            .then((result) => { if (!cancelled) setTypes(result.content); })
+            .catch(() => undefined);
+        return () => { cancelled = true; };
+    }, [roomId]);
+
+    useEffect(() => {
+        if (!roomId || tab !== "Hợp đồng") return;
+        let cancelled = false;
+        setContractsLoading(true);
+        setContractsError("");
+        contractsApi.list({roomId, page: 0, size: 100})
+            .then((result) => { if (!cancelled) setContracts(result.content); })
+            .catch((cause) => {
+                if (cancelled) return;
+                setContracts([]);
+                setContractsError(cause instanceof Error ? cause.message : "Không tải được hợp đồng của phòng.");
+            })
+            .finally(() => { if (!cancelled) setContractsLoading(false); });
+        return () => { cancelled = true; };
+    }, [roomId, tab, reload]);
+
     const openEdit = async () => {
         if (!room) return;
         setRoomForm(room); setFormError(""); setEditing(true);
@@ -104,13 +149,13 @@ export default function RoomDetailPage() {
     };
     const removeRoom = async () => {
         if (!roomId || !room || !await confirm({title: "Xóa phòng", message: `Bạn có chắc muốn xóa phòng ${room.roomCode}?`, confirmLabel: "Xóa phòng"})) return;
-        try { await propertyApi.deleteRoom(roomId); navigate(`/admin/buildings/${buildingId}/rooms`, {replace: true}); }
+        try { await propertyApi.deleteRoom(roomId); navigate(`/admin/rooms`, {replace: true}); }
         catch (cause) { setError(cause instanceof Error ? cause.message : "Không xóa được phòng."); }
     };
     const setNewPrice = async (event: FormEvent) => {
         event.preventDefault(); if (!roomId) return;
         setPriceError("");
-        try { await propertyApi.setRoomPrice(roomId, Number(price), effectiveFrom); setPrice(""); setPrices(await propertyApi.roomPrices(roomId)); setCurrentPrice(await propertyApi.currentRoomPrice(roomId)); }
+        try { await propertyApi.setRoomPrice(roomId, parseMoneyInput(price), effectiveFrom); setPrice(""); setPrices(await propertyApi.roomPrices(roomId)); setCurrentPrice(await propertyApi.currentRoomPrice(roomId)); }
         catch (cause) { setPriceError(cause instanceof Error ? cause.message : "Không cập nhật được giá."); }
     };
     const refreshImages = async () => setImages((await propertyApi.roomImages(roomId!)).sort((a, b) => a.displayOrder - b.displayOrder));
@@ -131,13 +176,22 @@ export default function RoomDetailPage() {
         catch (cause) { setImageError(cause instanceof Error ? cause.message : "Không xóa được ảnh."); } finally { setImageBusy(false); }
     };
 
-    if (!buildingId || !roomId) return <Navigate to="/admin/buildings" replace/>;
+    // Spec 9.2: chỉ VACANT ↔ MAINTENANCE được chuyển tay; OCCUPIED/UPCOMING_VACANT do sự kiện hợp đồng quyết định.
+    const canToggleStatus = room != null && (room.status === "VACANT" || room.status === "MAINTENANCE");
+    const statusLocked = room != null && !canToggleStatus;
+    const manualStatusOptions: Room["status"][] = canToggleStatus
+        ? ["VACANT", "MAINTENANCE"]
+        : room
+            ? [room.status]
+            : [];
+
+    if (!buildingId || !roomId) return <Navigate to="/admin/rooms" replace/>;
     return <>
         {confirmationPopup}
         <PropertyBreadcrumbs building={building} room={room}/>
         <PageHead eyebrow="" title={room ? `Phòng ${room.roomCode}` : "Chi tiết phòng"}
                   desc={building ? `${building.name} · ${building.address}` : "Đang tải thông tin tòa nhà…"}
-                  actions={<><Link className="secondary-button" to={`/admin/buildings/${buildingId}/rooms`}>Danh sách phòng</Link><button className="secondary-button" onClick={() => void openEdit()}>Sửa phòng</button><button className="danger-button" onClick={() => void removeRoom()}>Xóa phòng</button></>}/>
+                  actions={<><Link className="secondary-button" to={`/admin/buildings/${buildingId}/rooms`}>Danh sách phòng</Link>{canManageRooms && <><button className="secondary-button" onClick={() => void openEdit()}>Sửa phòng</button><button className="danger-button" onClick={() => void removeRoom()}>Xóa phòng</button></>}</>}/>
         {error && <div className="panel property-state" role="alert"><p>{error}</p>
             <button className="secondary-button" onClick={() => setReload((value) => value + 1)}>Thử lại</button>
         </div>}
@@ -171,7 +225,7 @@ export default function RoomDetailPage() {
                         </div>
                         <div>
                             <dt>Loại phòng</dt>
-                            <dd>{types.find((type) => type.id === room.roomTypeId)?.name ?? room.roomTypeId}</dd>
+                            <dd>{types.find((type) => type.id === room.roomTypeId)?.name ?? `#${room.roomTypeId}`}</dd>
                         </div>
                         <div>
                             <dt>Phòng ngủ</dt>
@@ -187,11 +241,11 @@ export default function RoomDetailPage() {
                         </div>
                     </dl>
                 </section>
-                <section className="panel p-6"><div className="room-section-heading"><div><h2 className="text-lg font-bold">Ảnh phòng</h2><p className="text-sm text-muted">JPEG, PNG hoặc WebP, tối đa 5 MiB mỗi ảnh.</p></div><label className="secondary-button">Thêm ảnh<input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={imageBusy} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }}/></label></div>
+                <section className="panel p-6"><div className="room-section-heading"><div><h2 className="text-lg font-bold">Ảnh phòng</h2><p className="text-sm text-muted">JPEG, PNG hoặc WebP, tối đa 5 MiB mỗi ảnh.</p></div>{canManageRooms && <label className="secondary-button">Thêm ảnh<input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={imageBusy} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }}/></label>}</div>
                     {imageError && <p className="field-error" role="alert">{imageError}</p>}{images.length === 0 && <p className="property-note">Chưa có ảnh phòng.</p>}
-                    <div className="room-image-grid">{images.map((image) => <figure key={image.imageId}><img src={image.imageUrl} alt={`Ảnh phòng ${room.roomCode}`} loading="lazy"/><figcaption>{image.primaryImage ? "Ảnh đại diện" : `Ảnh ${image.displayOrder + 1}`}</figcaption><div><button type="button" className="secondary-button" disabled={imageBusy || image.primaryImage} onClick={() => void updateImage(image, {primaryImage: true})}>Đặt ảnh đại diện</button><button type="button" className="danger-button" disabled={imageBusy} onClick={() => void removeImage(image)}>Xóa</button></div></figure>)}</div>
+                    <div className="room-image-grid">{images.map((image) => <figure key={image.imageId}><img src={image.imageUrl} alt={`Ảnh phòng ${room.roomCode}`} loading="lazy"/><figcaption>{image.primaryImage ? "Ảnh đại diện" : `Ảnh ${image.displayOrder + 1}`}</figcaption>{canManageRooms && <div><button type="button" className="secondary-button" disabled={imageBusy || image.primaryImage} onClick={() => void updateImage(image, {primaryImage: true})}>Đặt ảnh đại diện</button><button type="button" className="danger-button" disabled={imageBusy} onClick={() => void removeImage(image)}>Xóa</button></div>}</figure>)}</div>
                 </section>
-                <section className="panel p-6"><h2 className="text-lg font-bold">Lịch sử giá</h2><form className="room-price-form" onSubmit={setNewPrice}><Field label="Giá mới (₫)"><input required type="number" min={0} value={price} onChange={(event) => setPrice(event.target.value)}/></Field><Field label="Ngày hiệu lực"><input required type="date" min={new Date().toLocaleDateString("sv-SE", {timeZone: "Asia/Ho_Chi_Minh"})} value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)}/></Field><button className="primary-button">Áp dụng giá</button></form>{priceError && <p className="field-error" role="alert">{priceError}</p>}{prices.length ? <div className="property-table-wrap"><table className="data-table"><thead><tr><th>Giá</th><th>Từ ngày</th><th>Đến ngày</th></tr></thead><tbody>{prices.map((item) => <tr key={item.id}><td>{vnd(item.price)}</td><td>{item.effectiveFrom}</td><td>{item.effectiveTo ?? "Đang áp dụng"}</td></tr>)}</tbody></table></div> : <p className="property-note">Chưa có lịch sử giá.</p>}</section>
+                <section className="panel p-6"><h2 className="text-lg font-bold">Lịch sử giá</h2>{canManageRooms && <form className="room-price-form" onSubmit={setNewPrice}><Field label="Giá mới (₫)" hint={price ? `${parseMoneyInput(price).toLocaleString("vi-VN")} ₫` : undefined}><input required inputMode="numeric" value={price} onChange={(event) => setPrice(formatMoneyInput(event.target.value))}/></Field><Field label="Ngày hiệu lực"><input required type="date" min={new Date().toLocaleDateString("sv-SE", {timeZone: "Asia/Ho_Chi_Minh"})} value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)}/></Field><button className="primary-button">Áp dụng giá</button></form>}{priceError && <p className="field-error" role="alert">{priceError}</p>}{prices.length ? <div className="property-table-wrap"><table className="data-table"><thead><tr><th>Giá</th><th>Từ ngày</th><th>Đến ngày</th></tr></thead><tbody>{prices.map((item) => <tr key={item.id}><td>{vnd(item.price)}</td><td>{item.effectiveFrom}</td><td>{item.effectiveTo ?? "Đang áp dụng"}</td></tr>)}</tbody></table></div> : <p className="property-note">Chưa có lịch sử giá.</p>}</section>
             </div>}
             {(tab === "Người cư trú" || tab === "Lịch sử") && <section className="panel">
                 <div className="property-toolbar"><h2
@@ -208,7 +262,7 @@ export default function RoomDetailPage() {
                     <table className="data-table">
                         <thead>
                         <tr>
-                            <th>ID người dùng</th>
+                            <th>Người cư trú</th>
                             <th>Hợp đồng</th>
                             <th>Ngày vào</th>
                             <th>Ngày rời</th>
@@ -216,8 +270,8 @@ export default function RoomDetailPage() {
                         </tr>
                         </thead>
                         <tbody>{occupants.content.map((person) => <tr key={person.id}>
-                            <td>{person.userId}</td>
-                            <td>{person.contractId}</td>
+                            <td>{customerOf(person.userId) ?? `Khách #${person.userId}`}</td>
+                            <td>HĐ #{person.contractId}</td>
                             <td>{person.moveInDate}</td>
                             <td>{person.moveOutDate ?? "—"}</td>
                             <td><Pill
@@ -229,17 +283,46 @@ export default function RoomDetailPage() {
                 <div className="property-pagination"><span>Trang {page + 1}/{occupants.totalPages}</span>
                     <button className="secondary-button" disabled={page === 0} onClick={() => setPage(page - 1)}>Trước
                     </button>
-                    <button className="secondary-button" disabled={occupants.last}
+                    <button className="secondary-button" disabled={page + 1 >= occupants.totalPages}
                             onClick={() => setPage(page + 1)}>Sau
                     </button>
-                </div>}<p className="property-note px-5 pb-5">API cư trú hiện trả về ID người dùng và hợp đồng; tên và
-                thông tin liên hệ chưa có trong phản hồi này.</p></section>}
-            {tab === "Hợp đồng" &&
-                <div className="panel property-state">Thông tin hợp đồng theo phòng chưa có API đọc được xác
-                    nhận.</div>}
+                </div>}<p className="property-note px-5 pb-5">Tên người cư trú được tra cứu từ hồ sơ khách hàng; nếu không
+                có quyền xem hồ sơ thì hiển thị mã khách.</p></section>}
+            {tab === "Hợp đồng" && <section className="panel">
+                <div className="property-toolbar"><h2 className="text-lg font-bold">Hợp đồng của phòng {room.roomCode}</h2></div>
+                {contractsError ? <div className="property-state" role="alert"><p>{contractsError}</p>
+                    <button className="secondary-button" onClick={() => setReload((value) => value + 1)}>Thử lại</button>
+                </div> : contractsLoading ? <div className="property-state" role="status">Đang tải hợp đồng…</div>
+                    : !contracts || contracts.length === 0 ? <div className="property-state">Phòng này chưa có hợp đồng nào.</div>
+                        : <div className="property-table-wrap">
+                            <table className="data-table">
+                                <thead>
+                                <tr>
+                                    <th>Hợp đồng</th>
+                                    <th>Khách thuê</th>
+                                    <th>Trạng thái</th>
+                                    <th>Thời hạn</th>
+                                    <th className="text-right">Tiền thuê</th>
+                                    <th className="text-right">Tiền cọc</th>
+                                </tr>
+                                </thead>
+                                <tbody>{contracts.map((contract) => {
+                                    const status = contractStatuses[contract.status];
+                                    return <tr key={String(contract.id)}>
+                                        <td><b>HĐ #{contract.id}</b></td>
+                                        <td>{customerOf(contract.customerId) ?? `Khách #${contract.customerId}`}</td>
+                                        <td><Pill tone={status?.tone ?? "slate"}>{status?.label ?? contract.status}</Pill></td>
+                                        <td>{contract.startDate} → {contract.endDate ?? "không thời hạn"}</td>
+                                        <td className="text-right">{contract.rentAmount != null ? vnd(contract.rentAmount) : "—"}</td>
+                                        <td className="text-right">{contract.depositAmount != null ? vnd(contract.depositAmount) : "—"}</td>
+                                    </tr>;
+                                })}</tbody>
+                            </table>
+                        </div>}
+            </section>}
         </>}
         <Drawer open={editing} title="Sửa thông tin phòng" onClose={() => setEditing(false)} footer={<><button className="secondary-button" onClick={() => setEditing(false)}>Hủy</button><button className="primary-button" form="room-edit-form" disabled={saving}>{saving ? "Đang lưu…" : "Lưu thay đổi"}</button></>}>
-            {roomForm && <form id="room-edit-form" className="property-form" onSubmit={saveRoom}><Field label="Mã phòng"><input required maxLength={50} value={roomForm.roomCode} onChange={(e) => setRoomForm({...roomForm, roomCode: e.target.value})}/></Field><Field label="Loại phòng"><select required value={roomForm.roomTypeId} onChange={(e) => setRoomForm({...roomForm, roomTypeId: e.target.value})}><option value="">Chọn loại phòng</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></Field><Field label="Sức chứa"><input required type="number" min={1} value={roomForm.maxCapacity} onChange={(e) => setRoomForm({...roomForm, maxCapacity: Number(e.target.value)})}/></Field><Field label="Diện tích (m²)"><input required type="number" min={0.01} step="any" value={roomForm.area} onChange={(e) => setRoomForm({...roomForm, area: Number(e.target.value)})}/></Field><Field label="Số phòng ngủ"><input required type="number" min={0} value={roomForm.bedroomCount} onChange={(e) => setRoomForm({...roomForm, bedroomCount: Number(e.target.value)})}/></Field><Field label="Số phòng tắm"><input required type="number" min={0} value={roomForm.bathroomCount} onChange={(e) => setRoomForm({...roomForm, bathroomCount: Number(e.target.value)})}/></Field><Field label="Giá cơ bản (₫)"><input required type="number" min={0} value={roomForm.basePrice} onChange={(e) => setRoomForm({...roomForm, basePrice: Number(e.target.value)})}/></Field><Field label="Trạng thái"><select value={roomForm.status} onChange={(e) => setRoomForm({...roomForm, status: e.target.value as Room["status"]})}><option value="VACANT">Phòng trống</option><option value="OCCUPIED">Đang thuê</option><option value="UPCOMING_VACANT">Sắp trống</option><option value="MAINTENANCE">Bảo trì</option></select></Field>{formError && <p className="field-error" role="alert">{formError}</p>}</form>}
+            {roomForm && <form id="room-edit-form" className="property-form" onSubmit={saveRoom}><Field label="Mã phòng"><input required maxLength={50} value={roomForm.roomCode} onChange={(e) => setRoomForm({...roomForm, roomCode: e.target.value})}/></Field><Field label="Loại phòng"><select required value={roomForm.roomTypeId} onChange={(e) => setRoomForm({...roomForm, roomTypeId: e.target.value})}><option value="">Chọn loại phòng</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></Field><Field label="Sức chứa"><input required type="number" min={1} value={roomForm.maxCapacity} onChange={(e) => setRoomForm({...roomForm, maxCapacity: Number(e.target.value)})}/></Field><Field label="Diện tích (m²)"><input required type="number" min={0.01} step="any" value={roomForm.area} onChange={(e) => setRoomForm({...roomForm, area: Number(e.target.value)})}/></Field><Field label="Số phòng ngủ"><input required type="number" min={0} value={roomForm.bedroomCount} onChange={(e) => setRoomForm({...roomForm, bedroomCount: Number(e.target.value)})}/></Field><Field label="Số phòng tắm"><input required type="number" min={0} value={roomForm.bathroomCount} onChange={(e) => setRoomForm({...roomForm, bathroomCount: Number(e.target.value)})}/></Field><Field label="Giá cơ bản (₫)" hint={roomForm.basePrice ? `${parseMoneyInput(roomForm.basePrice).toLocaleString("vi-VN")} ₫` : undefined}><input required inputMode="numeric" value={formatMoneyInput(roomForm.basePrice)} onChange={(e) => setRoomForm({...roomForm, basePrice: parseMoneyInput(e.target.value)})}/></Field><Field label="Trạng thái"><select value={roomForm.status} disabled={statusLocked} onChange={(e) => setRoomForm({...roomForm, status: e.target.value as Room["status"]})}>{manualStatusOptions.map((value) => <option key={value} value={value}>{roomStatuses[value].label}</option>)}</select></Field>{statusLocked && <p className="property-note">Trạng thái “{roomStatuses[room?.status ?? "VACANT"].label}” do hợp đồng điều khiển. Chỉ có thể chuyển tay giữa Phòng trống và Bảo trì.</p>}{formError && <p className="field-error" role="alert">{formError}</p>}</form>}
         </Drawer>
     </>;
 }

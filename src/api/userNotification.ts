@@ -1,22 +1,23 @@
 import { apiFetch } from "@/shared/api/httpClient";
+import type { Id } from "@/shared/lib/id";
 
 export type UserProfile = {
-  id: number;
+  id: Id;
   fullName: string;
   phone: string | null;
   email: string | null;
   position: string | null;
   isAdmin: boolean | null;
-  buildingIds: number[] | null;
+  buildingIds: Id[] | null;
 };
 
 export type NotificationItem = {
-  id: number;
+  id: Id;
   type: string;
   title: string;
   content: string;
   refType: string | null;
-  refId: number | null;
+  refId: Id | null;
   isRead: boolean;
   createdAt: string;
 };
@@ -46,32 +47,39 @@ export const getUnreadCount = async () => {
   return result.count;
 };
 
-export const markNotificationRead = (id: number) =>
+export const markNotificationRead = (id: Id) =>
   apiFetch<void>(`/api/v1/notifications/${id}/read`, { method: "PUT" });
 
 export const markAllNotificationsRead = () =>
   apiFetch<void>("/api/v1/notifications/read-all", { method: "PUT" });
 
-export const getStaff = (page = 0, size = 20, buildingId?: number) =>
+export const getStaff = (page = 0, size = 20, buildingId?: Id) =>
   apiFetch<PageResponse<UserProfile>>(
     `/api/v1/staff?page=${page}&size=${size}${buildingId !== undefined ? `&buildingId=${buildingId}` : ""}`,
   );
 
-export const updateStaff = (id: number, body: ProfileUpdate & { position: string | null }) =>
+/** Tra cứu khách hàng cho nhân sự (chọn khách khi tạo hợp đồng/thêm người ở). */
+export const searchCustomers = (keyword = "", page = 0, size = 20) =>
+  apiFetch<PageResponse<UserProfile>>(
+    `/api/v1/users?keyword=${encodeURIComponent(keyword)}&page=${page}&size=${size}`,
+  );
+
+export const updateStaff = (id: Id, body: ProfileUpdate & { position: string | null }) =>
   apiFetch<UserProfile>(`/api/v1/staff/${id}`, { method: "PUT", body });
 
-export const getStaffBuildings = async (id: number) => {
-  const result = await apiFetch<{ staffId: number; buildingIds: number[] }>(`/api/v1/staff/${id}/buildings`);
+export const getStaffBuildings = async (id: Id) => {
+  const result = await apiFetch<{ staffId: Id; buildingIds: Id[] }>(`/api/v1/staff/${id}/buildings`);
   return result.buildingIds;
 };
 
-export const replaceStaffBuildings = (id: number, buildingIds: number[]) =>
+export const replaceStaffBuildings = (id: Id, buildingIds: Id[]) =>
   apiFetch<void>(`/api/v1/staff/${id}/buildings`, { method: "PUT", body: { buildingIds } });
 
 export function notificationKind(type: string): string {
   if (/Invoice|Payment/.test(type)) return "Hóa đơn";
   if (/Appointment/.test(type)) return "Lịch hẹn";
-  if (/Maintenance|Report|MeterReading/.test(type)) return "Sửa chữa";
+  if (/MeterReading/.test(type)) return "Chỉ số";
+  if (/Maintenance|Report/.test(type)) return "Sửa chữa";
   if (/RoommateApplication/.test(type)) return "Ở ghép";
   if (/Contract|Tenant|MoveOut/.test(type)) return "Hợp đồng";
   if (/RentalRequest/.test(type)) return "Yêu cầu thuê";

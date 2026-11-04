@@ -6,6 +6,20 @@ export function haversine(a: { lat: number; lng: number }, b: { lat: number; lng
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/** Vị trí mô phỏng của người dùng: trung tâm Quận 1, TP.HCM */
-export const HCM_CENTER = { lat: 10.7769, lng: 106.7009 };
+/** Định dạng mét/km cho khoảng cách bản đồ. */
+export function formatDistanceMeters(meters: number) {
+  if (!Number.isFinite(meters)) return "—";
+  if (meters < 950) return `${Math.round(meters / 10) * 10} m`;
+  return `${(meters / 1000).toLocaleString("vi-VN", { maximumFractionDigits: 1 })} km`;
+}
+
+/** Định dạng thời gian di chuyển. */
+export function formatDurationSeconds(seconds: number) {
+  if (!Number.isFinite(seconds)) return "—";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} phút`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} giờ ${rest} phút` : `${hours} giờ`;
+}
 

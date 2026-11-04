@@ -1,4 +1,5 @@
 import { usePropertyConfirm } from "./usePropertyConfirm";
+import { idStr, sameId, type Id } from "@/shared/lib/id";
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, toVNTime, todayVN, useToast, type Tone } from "@/shared/ui";
 import { useAuth } from "@/features/auth";
@@ -10,6 +11,8 @@ import {
   type MaintenanceReport,
   type MaintenanceSchedule,
 } from "@/api/assetMaintenance";
+import { propertyApi, type Room } from "@/features/properties/api/propertyApi";
+import { useBuildingLookup, useCustomerLookup, useRoomLookup } from "@/shared/lib/refLabels";
 
 const stateTone: Record<string, Tone> = {
   GOOD: "teal",
@@ -21,6 +24,13 @@ const stateLabel: Record<string, string> = {
   GOOD: "Tốt",
   NEEDS_REPAIR: "Cần sửa",
   BROKEN: "Hỏng",
+};
+
+const reportStatusLabel: Record<string, string> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Từ chối",
+  COMPLETED: "Hoàn tất",
 };
 
 export default function Assets() {
@@ -35,8 +45,8 @@ export default function Assets() {
   const availableTabs = canManageReports ? ["Báo hỏng", "Thiết bị", "Định kỳ"] : ["Thiết bị", "Định kỳ"];
   const [tab, setTab] = useState(canManageReports ? "Báo hỏng" : "Thiết bị");
 
-  const [availableBuildings, setAvailableBuildings] = useState<number[]>([]);
-  const [buildingId, setBuildingId] = useState<number | null>(null);
+  const [availableBuildings, setAvailableBuildings] = useState<Id[]>([]);
+  const [buildingId, setBuildingId] = useState<Id | null>(null);
   const [loadingBuildings, setLoadingBuildings] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -60,6 +70,15 @@ export default function Assets() {
   const [query, setQuery] = useState("");
   const [toast, show] = useToast();
 
+  const roomOf = useRoomLookup([
+    ...reports.map((r) => r.roomId),
+    ...appliances.map((a) => a.roomId),
+  ]);
+  const buildingOf = useBuildingLookup(availableBuildings);
+  const customerOf = useCustomerLookup(reports.map((r) => r.customerId));
+  const staffNameOf = (id: Id | null | undefined) =>
+    allTechnicians.find((tech) => sameId(tech.id, id))?.fullName;
+
   // Modal approve report
   const [selectedReport, setSelectedReport] = useState<MaintenanceReport | null>(null);
   const [assignStaffId, setAssignStaffId] = useState("");
@@ -72,6 +91,7 @@ export default function Assets() {
 
   // Modal add appliance
   const [addingAppliance, setAddingAppliance] = useState(false);
+  const [buildingRooms, setBuildingRooms] = useState<Room[]>([]);
   const [newRoomId, setNewRoomId] = useState("");
   const [newName, setNewName] = useState("");
   const [newStatus, setNewStatus] = useState("GOOD");
@@ -82,7 +102,7 @@ export default function Assets() {
   const [editApplianceName, setEditApplianceName] = useState("");
   const [editApplianceStatus, setEditApplianceStatus] = useState<"GOOD" | "NEEDS_REPAIR" | "BROKEN">("GOOD");
   const [savingEditAppliance, setSavingEditAppliance] = useState(false);
-  const [deletingApplianceId, setDeletingApplianceId] = useState<number | null>(null);
+  const [deletingApplianceId, setDeletingApplianceId] = useState<Id | null>(null);
 
   // Modal warranty
   const [warrantyAppliance, setWarrantyAppliance] = useState<Appliance | null>(null);
@@ -108,8 +128,8 @@ export default function Assets() {
   const [editScheduleNextDate, setEditScheduleNextDate] = useState("");
   const [savingEditSchedule, setSavingEditSchedule] = useState(false);
 
-  const [completingScheduleId, setCompletingScheduleId] = useState<number | null>(null);
-  const [deletingScheduleId, setDeletingScheduleId] = useState<number | null>(null);
+  const [completingScheduleId, setCompletingScheduleId] = useState<Id | null>(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<Id | null>(null);
 
   // Tải danh sách tòa nhà theo thẩm quyền và danh sách kỹ thuật viên
   const loadBuildings = useCallback(async () => {
@@ -117,16 +137,21 @@ export default function Assets() {
     setProfileError(null);
     setStaffLoadError(null);
     try {
-      let bList: number[] = [];
+      let bList: Id[] = [];
       if (isAdmin) {
-        // Với ADMIN: chỉ dùng nguồn có thẩm quyền từ property-service.
-        // Vì property-service (cổng 8083) chưa có mã nguồn backend, để danh sách rỗng thay vì suy đoán từ nhân sự.
-        bList = [];
+        try {
+          const bRes = await propertyApi.buildings(0, 100, "", "", "");
+          bList = (bRes.content || []).map((b) => b.buildingId);
+        } catch (err) {
+          setProfileError(err instanceof Error ? err.message : "Không thể tải danh sách tòa nhà.");
+        }
       } else {
         try {
           const profile = await getMyProfile();
           bList = profile.buildingIds
-            ? Array.from(new Set(profile.buildingIds)).sort((a, b) => a - b)
+            ? Array.from(new Set(profile.buildingIds)).sort((a, b) =>
+                String(a).localeCompare(String(b), "vi", { numeric: true }),
+              )
             : [];
         } catch (err) {
           setProfileError(err instanceof Error ? err.message : "Không thể tải hồ sơ cá nhân.");
@@ -142,22 +167,25 @@ export default function Assets() {
             const pos = (s.position || "").toUpperCase();
             return pos.includes("KY_THUAT") || pos.includes("KỸ THUẬT");
           });
-        } else if (bList.length > 0) {
+        } else if (canManageReports && bList.length > 0) {
           // Lấy kỹ thuật viên cho từng tòa được phân công, gộp theo ID
-          const staffMap = new Map<number, UserProfile>();
+          const staffMap = new Map<string, UserProfile>();
           await Promise.all(
             bList.map(async (bId) => {
               try {
                 const res = await getStaff(0, 100, bId);
                 for (const s of res.content || []) {
-                  const existing = staffMap.get(s.id);
+                  const key = idStr(s.id);
+                  const existing = staffMap.get(key);
                   if (existing) {
                     const mergedBIds = Array.from(
-                      new Set([...(existing.buildingIds || []), ...(s.buildingIds || [])])
+                      new Map(
+                        [...(existing.buildingIds || []), ...(s.buildingIds || [])].map((id) => [idStr(id), id]),
+                      ).values(),
                     );
-                    staffMap.set(s.id, { ...existing, buildingIds: mergedBIds });
+                    staffMap.set(key, { ...existing, buildingIds: mergedBIds });
                   } else {
-                    staffMap.set(s.id, s);
+                    staffMap.set(key, s);
                   }
                 }
               } catch {
@@ -187,7 +215,7 @@ export default function Assets() {
     } finally {
       setLoadingBuildings(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, canManageReports]);
 
   useEffect(() => {
     void loadBuildings();
@@ -195,7 +223,7 @@ export default function Assets() {
 
   // Lọc kỹ thuật viên theo buildingIds có chứa tòa nhà đang chọn
   const buildingTechs = buildingId != null
-    ? allTechnicians.filter((t) => t.buildingIds && t.buildingIds.includes(buildingId))
+    ? allTechnicians.filter((t) => t.buildingIds?.some((id) => sameId(id, buildingId)))
     : [];
 
   useEffect(() => {
@@ -205,6 +233,19 @@ export default function Assets() {
       setAssignStaffId("");
     }
   }, [buildingId, allTechnicians]);
+
+  // Chọn phòng từ danh sách của tòa đang chọn thay vì bắt người dùng gõ ID phòng.
+  useEffect(() => {
+    if (buildingId == null) {
+      setBuildingRooms([]);
+      return;
+    }
+    const controller = new AbortController();
+    propertyApi.rooms(idStr(buildingId), 0, "roomCode,asc", controller.signal)
+      .then((res) => setBuildingRooms(res.content ?? []))
+      .catch(() => setBuildingRooms([]));
+    return () => controller.abort();
+  }, [buildingId]);
 
   const loadReports = useCallback(async () => {
     if (!canManageReports || buildingId == null) {
@@ -285,8 +326,8 @@ export default function Assets() {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền duyệt báo hỏng.");
       return;
     }
-    const staffIdNum = Number(assignStaffId);
-    if (!staffIdNum || buildingTechs.length === 0) {
+    const staffIdValue = assignStaffId.trim();
+    if (!staffIdValue || buildingTechs.length === 0) {
       show("Không có kỹ thuật viên hợp lệ được phân công tại tòa nhà này.");
       return;
     }
@@ -296,10 +337,10 @@ export default function Assets() {
         ? new Date(assignScheduledAt).toISOString()
         : new Date(Date.now() + 86400000).toISOString();
       await assetApi.approve(selectedReport.id, {
-        staffId: staffIdNum,
+        staffId: staffIdValue,
         priority: assignPriority,
         scheduledAt: date,
-        applianceId: assignApplianceId ? Number(assignApplianceId) : undefined,
+        applianceId: assignApplianceId.trim() || undefined,
       });
       show("Đã duyệt báo hỏng và tạo phiếu kỹ thuật.");
       setSelectedReport(null);
@@ -341,13 +382,13 @@ export default function Assets() {
       return;
     }
     if (!newName.trim() || !newRoomId) {
-      show("Vui lòng nhập tên thiết bị và ID phòng.");
+      show("Vui lòng nhập tên thiết bị và chọn phòng.");
       return;
     }
     setSavingAppliance(true);
     try {
       await assetApi.createAppliance({
-        roomId: Number(newRoomId),
+        roomId: newRoomId.trim(),
         name: newName.trim(),
         status: newStatus,
       });
@@ -411,7 +452,7 @@ export default function Assets() {
     }
   };
 
-  const handleDeleteAppliance = async (id: number) => {
+  const handleDeleteAppliance = async (id: Id) => {
     if (!canManageAssets) return;
     if (!await confirm({ title: "Xóa thiết bị", message: "Bạn có chắc chắn muốn xóa thiết bị này?", confirmLabel: "Xóa thiết bị" })) return;
     setDeletingApplianceId(id);
@@ -436,7 +477,7 @@ export default function Assets() {
     try {
       await assetApi.createSchedule({
         buildingId,
-        staffId: Number(newScheduleStaffId),
+        staffId: newScheduleStaffId.trim(),
         title: newScheduleTitle.trim(),
         description: newScheduleDesc.trim() || undefined,
         intervalMonths: Number(newScheduleInterval) || 1,
@@ -464,7 +505,7 @@ export default function Assets() {
     setSavingEditSchedule(true);
     try {
       await assetApi.updateSchedule(editingSchedule.id, {
-        staffId: Number(editScheduleStaffId),
+        staffId: editScheduleStaffId.trim(),
         title: editScheduleTitle.trim(),
         description: editScheduleDesc.trim() || undefined,
         intervalMonths: Number(editScheduleInterval) || 1,
@@ -480,7 +521,7 @@ export default function Assets() {
     }
   };
 
-  const handleDeleteSchedule = async (id: number) => {
+  const handleDeleteSchedule = async (id: Id) => {
     if (!canManageAssets) return;
     if (!await confirm({ title: "Xóa lịch bảo trì", message: "Bạn có chắc chắn muốn xóa lịch bảo trì này?", confirmLabel: "Xóa lịch bảo trì" })) return;
     setDeletingScheduleId(id);
@@ -495,7 +536,7 @@ export default function Assets() {
     }
   };
 
-  const handleCompleteSchedule = async (id: number) => {
+  const handleCompleteSchedule = async (id: Id) => {
     setCompletingScheduleId(id);
     try {
       await assetApi.completeSchedule(id);
@@ -532,11 +573,11 @@ export default function Assets() {
               <select
                 className="select !h-[40px]"
                 value={buildingId ?? ""}
-                onChange={(e) => setBuildingId(Number(e.target.value))}
+                onChange={(e) => setBuildingId(e.target.value)}
               >
                 {availableBuildings.map((id) => (
                   <option key={id} value={id}>
-                    Tòa nhà #{id}
+                    {buildingOf(id) ?? `Tòa nhà #${id}`}
                   </option>
                 ))}
               </select>
@@ -597,10 +638,9 @@ export default function Assets() {
           </div>
           {isAdmin ? (
             <>
-              <h2 className="text-xl font-bold">Dịch vụ quản lý tòa nhà chưa được kết nối</h2>
+              <h2 className="text-xl font-bold">Chưa có tòa nhà nào trong hệ thống</h2>
               <p className="mx-auto mt-2 max-w-lg text-sm text-muted">
-                Tài khoản Quản trị viên (ADMIN) cần truy xuất danh mục toàn bộ tòa nhà từ <code>property-service</code> (cổng 8083),
-                nhưng dịch vụ này hiện chưa có mã nguồn backend. Hệ thống không tự suy đoán danh sách tòa từ phân công nhân sự.
+                Vui lòng tạo tòa nhà mới trong mục Quản lý tòa nhà để bắt đầu quản lý tài sản và bảo trì.
               </p>
             </>
           ) : (
@@ -619,7 +659,7 @@ export default function Assets() {
             <MiniStat
               label="Thiết bị tại tòa"
               value={appliancesError ? "!" : String(appliances.length)}
-              note={buildingId ? `Tòa #${buildingId}` : "Chưa chọn tòa"}
+              note={buildingId ? buildingOf(buildingId) ?? `Tòa #${buildingId}` : "Chưa chọn tòa"}
             />
             <MiniStat
               label="Hoạt động tốt"
@@ -687,8 +727,8 @@ export default function Assets() {
                         <b className="text-sm">{r.title}</b>
                         <p className="text-xs text-muted mt-0.5 line-clamp-1">{r.description}</p>
                         <div className="text-xs text-muted mt-1">
-                          Phòng #{r.roomId} · Khách #{r.customerId} · {toVNTime(r.createdAt, true)} · Trạng thái:{" "}
-                          <span className="font-semibold text-ink">{r.status}</span>
+                          Phòng {roomOf(r.roomId)?.code ?? `#${r.roomId}`} · {customerOf(r.customerId) ?? `Khách #${r.customerId}`} · {toVNTime(r.createdAt, true)} · Trạng thái:{" "}
+                          <span className="font-semibold text-ink">{reportStatusLabel[r.status] ?? r.status}</span>
                         </div>
                       </div>
                       {r.status === "PENDING" && canManageReports && (
@@ -737,7 +777,7 @@ export default function Assets() {
                             <b>{a.name}</b>
                             <div className="sub font-mono">#{a.id}</div>
                           </td>
-                          <td className="text-[13px]">Phòng #{a.roomId}</td>
+                          <td className="text-[13px]">Phòng {roomOf(a.roomId)?.code ?? `#${a.roomId}`}</td>
                           <td>
                             <Pill tone={stateTone[a.status] || "slate"}>
                               {stateLabel[a.status] || a.status}
@@ -822,7 +862,7 @@ export default function Assets() {
                       </div>
                       <div className="text-right">
                         <div className="text-xs font-bold text-muted">Kỹ thuật viên</div>
-                        <div className="text-sm font-semibold">#{s.staffId}</div>
+                        <div className="text-sm font-semibold">{staffNameOf(s.staffId) ?? `#${s.staffId}`}</div>
                       </div>
                     </div>
                     <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-xs text-muted">
@@ -830,7 +870,7 @@ export default function Assets() {
                       <span>Kế tiếp: <b className="text-ink">{toVNTime(s.nextDate)}</b></span>
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
-                      {(canManageAssets || (isTech && user?.id && s.staffId === Number(user.id))) && (
+                      {(canManageAssets || (isTech && user?.id != null && sameId(s.staffId, user.id))) && (
                         <button
                           className="primary-button !py-1 !px-3 text-xs"
                           disabled={completingScheduleId === s.id}
@@ -926,7 +966,7 @@ export default function Assets() {
                   </div>
                 ) : buildingTechs.length === 0 ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-                    Không có kỹ thuật viên nào được phân công tại Tòa #{buildingId}. Vui lòng phân công kỹ thuật viên cho tòa nhà này trước khi duyệt.
+                    Không có kỹ thuật viên nào được phân công tại {buildingOf(buildingId) ?? `Tòa #${buildingId}`}. Vui lòng phân công kỹ thuật viên cho tòa nhà này trước khi duyệt.
                   </div>
                 ) : (
                   <select
@@ -1015,13 +1055,19 @@ export default function Assets() {
                 />
               </Field>
             </div>
-            <Field label="ID Phòng">
-              <input
-                type="number"
+            <Field label="Phòng">
+              <select
+                className="select"
                 value={newRoomId}
                 onChange={(e) => setNewRoomId(e.target.value)}
-                placeholder="101"
-              />
+              >
+                <option value="">Chọn phòng</option>
+                {buildingRooms.map((room) => (
+                  <option key={idStr(room.id)} value={idStr(room.id)}>
+                    {room.roomCode}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Tình trạng">
               <select
@@ -1185,7 +1231,7 @@ export default function Assets() {
                 </div>
               ) : buildingTechs.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                  Không có kỹ thuật viên tại Tòa #{buildingId}
+                  Không có kỹ thuật viên tại {buildingOf(buildingId) ?? `Tòa #${buildingId}`}
                 </div>
               ) : (
                 <select
@@ -1269,7 +1315,7 @@ export default function Assets() {
             <Field label="Kỹ thuật viên phụ trách">
               {buildingTechs.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                  Không có kỹ thuật viên tại Tòa #{buildingId}
+                  Không có kỹ thuật viên tại {buildingOf(buildingId) ?? `Tòa #${buildingId}`}
                 </div>
               ) : (
                 <select

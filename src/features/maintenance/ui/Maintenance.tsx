@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 import { Drawer, Field, Icon, PageHead, Pill, toVNTime, useToast, type Tone } from "@/shared/ui";
 import { hasAnyRole, useAuth } from "@/features/auth";
 import { getMyProfile, getStaff, type UserProfile } from "@/api/userNotification";
+import { propertyApi } from "@/features/properties/api/propertyApi";
+import { idStr, sameId, type Id } from "@/shared/lib/id";
+import { useBuildingLookup, useRoomLookup } from "@/shared/lib/refLabels";
 import { fetchPagedHistory } from "@/api/pagedHistory";
 import {
   assetApi,
@@ -23,17 +27,21 @@ const prioLabel: Record<string, string> = {
   LOW: "Thấp",
 };
 
+// /api/v1/reports bắt buộc buildingId nên chế độ "tất cả tòa" gọi lần lượt từng tòa rồi gộp.
+const ALL_BUILDINGS = "__all__";
+type BuildingFilter = Id | typeof ALL_BUILDINGS;
+
 export default function Maintenance() {
   const { user } = useAuth();
   const isAdmin = hasAnyRole(user, ["ADMIN"]);
   const isTech = hasAnyRole(user, ["KY_THUAT"]);
   const isSale = hasAnyRole(user, ["SALE"]);
-  // SALE được đọc báo hỏng trong building scope; chỉ QUAN_LY/ADMIN được duyệt/từ chối.
-  const canReadReports = hasAnyRole(user, ["QUAN_LY", "SALE", "ADMIN"]);
+  // Đặc tả: GET /reports chỉ cho QUAN_LY (ADMIN luôn được phép); SALE chỉ xem phiếu sửa chữa.
+  const canReadReports = hasAnyRole(user, ["QUAN_LY", "ADMIN"]);
   const canManageReports = hasAnyRole(user, ["QUAN_LY", "ADMIN"]);
 
-  const [availableBuildings, setAvailableBuildings] = useState<number[]>([]);
-  const [buildingId, setBuildingId] = useState<number | null>(null);
+  const [availableBuildings, setAvailableBuildings] = useState<Id[]>([]);
+  const [buildingId, setBuildingId] = useState<BuildingFilter | null>(null);
   const [loadingBuildings, setLoadingBuildings] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -43,6 +51,7 @@ export default function Maintenance() {
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [requestsError, setRequestsError] = useState<string | null>(null);
   const [requestsPartial, setRequestsPartial] = useState(false);
+  const [reportsPartial, setReportsPartial] = useState(false);
 
   const [pendingReports, setPendingReports] = useState<MaintenanceReport[]>([]);
   const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
@@ -59,22 +68,34 @@ export default function Maintenance() {
 
   const [toast, show] = useToast();
 
+  const roomOf = useRoomLookup([
+    ...pendingReports.map((r) => r.roomId),
+    ...requests.map((t) => t.roomId),
+  ]);
+  const buildingOf = useBuildingLookup(availableBuildings);
+  // KY_THUAT không đọc được /staff nên tên kỹ thuật viên khác không tra cứu được;
+  // riêng phiếu của chính mình vẫn hiển thị rõ thay vì mã số thô.
+  const staffNameOf = (id: Id | null | undefined) =>
+    allTechnicians.find((tech) => sameId(tech.id, id))?.fullName ??
+    (user && sameId(user.id, id) ? "Bạn" : undefined);
+
   // Tải danh sách tòa nhà theo thẩm quyền và danh sách kỹ thuật viên
   const loadBuildings = useCallback(async () => {
     setLoadingBuildings(true);
     setProfileError(null);
     setStaffLoadError(null);
     try {
-      let bList: number[] = [];
+      let bList: Id[] = [];
       if (isAdmin) {
-        // Với ADMIN: chỉ dùng nguồn có thẩm quyền từ property-service.
-        // Vì property-service (cổng 8083) chưa có mã nguồn backend, để danh sách rỗng thay vì suy đoán từ nhân sự.
-        bList = [];
+        const page = await propertyApi.buildings(0, 100, "", "", "");
+        bList = page.content.map((b) => b.buildingId);
       } else {
         try {
           const profile = await getMyProfile();
           bList = profile.buildingIds
-            ? Array.from(new Set(profile.buildingIds)).sort((a, b) => a - b)
+            ? Array.from(new Set(profile.buildingIds)).sort((a, b) =>
+                String(a).localeCompare(String(b), "vi", { numeric: true }),
+              )
             : [];
         } catch (err) {
           setProfileError(err instanceof Error ? err.message : "Không thể tải hồ sơ cá nhân.");
@@ -92,20 +113,23 @@ export default function Maintenance() {
           });
         } else if (canManageReports && bList.length > 0) {
           // Lấy kỹ thuật viên cho từng tòa được phân công, gộp theo ID
-          const staffMap = new Map<number, UserProfile>();
+          const staffMap = new Map<string, UserProfile>();
           await Promise.all(
             bList.map(async (bId) => {
               try {
                 const res = await getStaff(0, 100, bId);
                 for (const s of res.content || []) {
-                  const existing = staffMap.get(s.id);
+                  const key = idStr(s.id);
+                  const existing = staffMap.get(key);
                   if (existing) {
                     const mergedBIds = Array.from(
-                      new Set([...(existing.buildingIds || []), ...(s.buildingIds || [])])
+                      new Map(
+                        [...(existing.buildingIds || []), ...(s.buildingIds || [])].map((id) => [idStr(id), id]),
+                      ).values(),
                     );
-                    staffMap.set(s.id, { ...existing, buildingIds: mergedBIds });
+                    staffMap.set(key, { ...existing, buildingIds: mergedBIds });
                   } else {
-                    staffMap.set(s.id, s);
+                    staffMap.set(key, s);
                   }
                 }
               } catch {
@@ -124,15 +148,9 @@ export default function Maintenance() {
 
       setAllTechnicians(techs);
       setAvailableBuildings(bList);
-      if (bList.length > 0) {
-        setBuildingId(bList[0]);
-      } else {
-        setBuildingId(null);
-      }
+      setBuildingId(bList.length > 0 ? ALL_BUILDINGS : null);
     } catch (e) {
-      if (!isAdmin) {
-        setProfileError(e instanceof Error ? e.message : "Lỗi kết nối khi tải hồ sơ phân công.");
-      }
+      setProfileError(e instanceof Error ? e.message : "Lỗi kết nối khi tải danh sách tòa nhà.");
       setAvailableBuildings([]);
       setBuildingId(null);
     } finally {
@@ -144,9 +162,11 @@ export default function Maintenance() {
     void loadBuildings();
   }, [loadBuildings]);
 
-  // Lọc kỹ thuật viên theo buildingIds có chứa tòa nhà đang chọn
-  const buildingTechs = buildingId != null
-    ? allTechnicians.filter((t) => t.buildingIds && t.buildingIds.includes(buildingId))
+  // Khi xem tất cả tòa, kỹ thuật viên được lọc theo tòa của báo hỏng đang mở.
+  const approvalBuildingId: Id | null = selectedReport?.buildingId
+    ?? (buildingId !== ALL_BUILDINGS ? buildingId : null);
+  const buildingTechs = approvalBuildingId != null
+    ? allTechnicians.filter((t) => t.buildingIds?.some((id) => sameId(id, approvalBuildingId)))
     : [];
 
   useEffect(() => {
@@ -155,7 +175,7 @@ export default function Maintenance() {
     } else {
       setAssignStaffId("");
     }
-  }, [buildingId, allTechnicians]);
+  }, [approvalBuildingId, allTechnicians, buildingTechs.length]);
 
   const loadData = useCallback(async () => {
     if (buildingId == null) {
@@ -163,32 +183,46 @@ export default function Maintenance() {
       setRequests([]);
       return;
     }
+    const allBuildings = buildingId === ALL_BUILDINGS;
+    const reportBuildings = allBuildings ? availableBuildings : [buildingId];
+
     setLoading(true);
     setReportsError(null);
     setRequestsError(null);
     setRequestsPartial(false);
+    setReportsPartial(false);
 
     const promises: Promise<void>[] = [];
 
-    // QUAN_LY/SALE/ADMIN được đọc /api/v1/reports trong scope; KY_THUAT không gọi endpoint này.
+    // QUAN_LY/ADMIN được đọc /api/v1/reports trong scope; KY_THUAT/SALE không gọi endpoint này.
     if (canReadReports) {
       promises.push(
-        fetchPagedHistory(
-          (page, size) => assetApi.reportsPage(buildingId, "PENDING", page, size),
-        )
-          .then((history) => setPendingReports(history.items))
-          .catch((err) => {
-            setReportsError(err instanceof Error ? err.message : "Không thể tải báo hỏng từ máy chủ.");
-            setPendingReports([]);
-          })
+        Promise.allSettled(
+          reportBuildings.map((id) => fetchPagedHistory(
+            (page, size) => assetApi.reportsPage(id, "PENDING", page, size),
+          )),
+        ).then((results) => {
+          const items = results.flatMap((result) => result.status === "fulfilled" ? result.value.items : []);
+          const failures = results.filter((result) => result.status === "rejected");
+          setPendingReports([...new Map(items.map((item) => [String(item.id), item])).values()]);
+          if (failures.length === results.length) {
+            const first = failures[0] as PromiseRejectedResult;
+            setReportsError(first.reason instanceof Error ? first.reason.message : "Không thể tải báo hỏng từ máy chủ.");
+          } else if (failures.length > 0) {
+            setReportsPartial(true);
+          }
+        })
       );
     } else {
       setPendingReports([]);
     }
 
+    const requestQuery = allBuildings ? "" : `?buildingId=${buildingId}`;
     promises.push(
       fetchPagedHistory(
-        (page, size) => assetApi.requestsPage(`?buildingId=${buildingId}&page=${page}&size=${size}`),
+        (page, size) => assetApi.requestsPage(
+          `${requestQuery}${requestQuery ? "&" : "?"}page=${page}&size=${size}`,
+        ),
       )
         .then((history) => {
           setRequests(history.items);
@@ -203,7 +237,7 @@ export default function Maintenance() {
 
     await Promise.allSettled(promises);
     setLoading(false);
-  }, [buildingId, canReadReports]);
+  }, [availableBuildings, buildingId, canReadReports]);
 
   useEffect(() => {
     void loadData();
@@ -215,8 +249,8 @@ export default function Maintenance() {
       show("Chỉ Quản lý hoặc Quản trị viên mới có quyền duyệt báo hỏng.");
       return;
     }
-    const staffIdNum = Number(assignStaffId);
-    if (!staffIdNum || buildingTechs.length === 0) {
+    const staffIdValue = assignStaffId.trim();
+    if (!staffIdValue || buildingTechs.length === 0) {
       show("Không có kỹ thuật viên hợp lệ được phân công tại tòa nhà này.");
       return;
     }
@@ -226,10 +260,10 @@ export default function Maintenance() {
         ? new Date(assignScheduledAt).toISOString()
         : new Date(Date.now() + 86400000).toISOString();
       await assetApi.approve(selectedReport.id, {
-        staffId: staffIdNum,
+        staffId: staffIdValue,
         priority: assignPriority,
         scheduledAt: date,
-        applianceId: assignApplianceId ? Number(assignApplianceId) : undefined,
+        applianceId: assignApplianceId.trim() || undefined,
       });
       show("Đã duyệt báo hỏng và phân công kỹ thuật.");
       setSelectedReport(null);
@@ -287,11 +321,13 @@ export default function Maintenance() {
               <select
                 className="select !h-[42px]"
                 value={buildingId ?? ""}
-                onChange={(e) => setBuildingId(Number(e.target.value))}
+                onChange={(e) => setBuildingId(e.target.value)}
+                aria-label="Lọc theo tòa nhà"
               >
+                <option value={ALL_BUILDINGS}>Tất cả tòa nhà ({availableBuildings.length})</option>
                 {availableBuildings.map((id) => (
                   <option key={id} value={id}>
-                    Tòa nhà #{id}
+                    {buildingOf(id) ?? `Tòa nhà #${id}`}
                   </option>
                 ))}
               </select>
@@ -317,15 +353,19 @@ export default function Maintenance() {
 
       {loadingBuildings ? (
         <div className="p-12 text-center text-sm text-muted">Đang kiểm tra phân công tòa nhà…</div>
-      ) : profileError && !isAdmin ? (
+      ) : profileError ? (
         <div className="rounded-2xl border border-line bg-white p-12 text-center">
           <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-red-50 text-red-600">
             <Icon name="tools" size={28} />
           </div>
-          <h2 className="text-xl font-bold">Không thể tải hồ sơ phân công</h2>
+          <h2 className="text-xl font-bold">
+            {isAdmin ? "Không thể tải danh sách tòa nhà" : "Không thể tải hồ sơ phân công"}
+          </h2>
           <p className="mx-auto mt-2 max-w-lg text-sm text-muted">
-            Lỗi kết nối tới dịch vụ hồ sơ (<code>user-notification-service</code>): {profileError}.
-            Hệ thống không thể xác định danh sách tòa nhà bạn phụ trách.
+            {isAdmin
+              ? <>Lỗi kết nối tới <code>property-service</code> khi lấy danh mục tòa nhà: {profileError}.</>
+              : <>Lỗi kết nối tới dịch vụ hồ sơ (<code>user-notification-service</code>): {profileError}.
+                  Hệ thống không thể xác định danh sách tòa nhà bạn phụ trách.</>}
           </p>
           <button className="secondary-button mt-4" onClick={() => void loadBuildings()}>
             <Icon name="refresh" size={16} /> Thử lại
@@ -338,11 +378,14 @@ export default function Maintenance() {
           </div>
           {isAdmin ? (
             <>
-              <h2 className="text-xl font-bold">Dịch vụ quản lý tòa nhà chưa được kết nối</h2>
+              <h2 className="text-xl font-bold">Hệ thống chưa có tòa nhà nào</h2>
               <p className="mx-auto mt-2 max-w-lg text-sm text-muted">
-                Tài khoản Quản trị viên (ADMIN) cần truy xuất danh mục toàn bộ tòa nhà từ <code>property-service</code> (cổng 8083),
-                nhưng dịch vụ này hiện chưa có mã nguồn backend. Hệ thống không tự suy đoán danh sách tòa từ phân công nhân sự.
+                <code>property-service</code> trả về danh sách tòa nhà rỗng. Hãy tạo tòa nhà trước khi
+                tiếp nhận và xử lý báo hỏng.
               </p>
+              <Link to="/admin/buildings" className="primary-button mt-4 inline-flex">
+                <Icon name="plus" size={16} /> Tạo tòa nhà
+              </Link>
             </>
           ) : (
             <>
@@ -370,6 +413,7 @@ export default function Maintenance() {
           )}
 
           {requestsPartial && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">Chỉ tải được một phần danh sách phiếu bảo trì.</div>}
+          {reportsPartial && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">Chỉ tải được báo hỏng của một số tòa nhà; hãy chọn từng tòa để kiểm tra đầy đủ.</div>}
           <div className={`kanban ${canReadReports ? "" : "!grid-cols-3"}`}>
             {/* Cột Báo hỏng mới tiếp nhận: QUAN_LY/SALE/ADMIN được đọc, chỉ QUAN_LY/ADMIN được xử lý */}
             {canReadReports && (
@@ -402,7 +446,7 @@ export default function Maintenance() {
                       <p className="text-xs text-muted mt-1 line-clamp-2">{r.description}</p>
                       <div className="flex items-center gap-1 text-xs text-muted mt-2">
                         <Icon name="pin" size={12} />
-                        Phòng #{r.roomId}
+                        {roomOf(r.roomId) ? `Phòng ${roomOf(r.roomId)!.code}` : `Phòng #${r.roomId}`}
                       </div>
                       <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
                         {canManageReports ? (
@@ -447,15 +491,15 @@ export default function Maintenance() {
                         {prioLabel[t.priority] || t.priority}
                       </Pill>
                     </div>
-                    <h3>Yêu cầu bảo trì phòng #{t.roomId}</h3>
+                    <h3>Yêu cầu bảo trì phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`}</h3>
                     <div className="flex items-center gap-1 text-xs text-muted mt-1">
                       <Icon name="pin" size={12} />
-                      Phòng #{t.roomId} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
+                      Phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
                     </div>
                     <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
                       <span className="flex items-center gap-1.5 font-semibold">
                         <span className="avatar-chip !h-6 !w-6">KT</span>
-                        Kỹ thuật #{t.staffId}
+                        {staffNameOf(t.staffId) ?? `Kỹ thuật #${t.staffId}`}
                       </span>
                       <span className="text-muted">{toVNTime(t.createdAt, true)}</span>
                     </div>
@@ -487,15 +531,15 @@ export default function Maintenance() {
                         {prioLabel[t.priority] || t.priority}
                       </Pill>
                     </div>
-                    <h3>Yêu cầu bảo trì phòng #{t.roomId}</h3>
+                    <h3>Yêu cầu bảo trì phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`}</h3>
                     <div className="flex items-center gap-1 text-xs text-muted mt-1">
                       <Icon name="pin" size={12} />
-                      Phòng #{t.roomId} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
+                      Phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
                     </div>
                     <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
                       <span className="flex items-center gap-1.5 font-semibold">
                         <span className="avatar-chip !h-6 !w-6">KT</span>
-                        Kỹ thuật #{t.staffId}
+                        {staffNameOf(t.staffId) ?? `Kỹ thuật #${t.staffId}`}
                       </span>
                       <span className="text-muted">{toVNTime(t.createdAt, true)}</span>
                     </div>
@@ -527,15 +571,15 @@ export default function Maintenance() {
                         {prioLabel[t.priority] || t.priority}
                       </Pill>
                     </div>
-                    <h3>Yêu cầu bảo trì phòng #{t.roomId}</h3>
+                    <h3>Yêu cầu bảo trì phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`}</h3>
                     <div className="flex items-center gap-1 text-xs text-muted mt-1">
                       <Icon name="pin" size={12} />
-                      Phòng #{t.roomId} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
+                      Phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`} {t.applianceId ? `· Thiết bị #${t.applianceId}` : ""}
                     </div>
                     <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-[11px]">
                       <span className="flex items-center gap-1.5 font-semibold">
                         <span className="avatar-chip !h-6 !w-6">KT</span>
-                        Kỹ thuật #{t.staffId}
+                        {staffNameOf(t.staffId) ?? `Kỹ thuật #${t.staffId}`}
                       </span>
                       <span className="text-muted">{toVNTime(t.createdAt, true)}</span>
                     </div>
@@ -601,7 +645,7 @@ export default function Maintenance() {
                   </div>
                 ) : buildingTechs.length === 0 ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-                    Không có kỹ thuật viên nào được phân công tại Tòa #{buildingId}. Vui lòng phân công kỹ thuật viên cho tòa nhà này trước khi duyệt.
+                    Không có kỹ thuật viên nào được phân công tại {buildingOf(approvalBuildingId) ?? `Tòa #${approvalBuildingId}`}. Vui lòng phân công kỹ thuật viên cho tòa nhà này trước khi duyệt.
                   </div>
                 ) : (
                   <select

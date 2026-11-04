@@ -1,11 +1,12 @@
 import { apiFetch } from "@/shared/api/httpClient";
+import type { Id } from "@/shared/lib/id";
 
 /*─────────────────────────────
   Types (mirror billing-utility-service DTOs)
 ─────────────────────────────*/
 
 export type UtilityType = {
-  id: number;
+  id: Id;
   name: string;
   unit: string;
   unitPrice: number;
@@ -19,15 +20,15 @@ export type UtilityTypeRequest = {
 };
 
 export type BuildingService = {
-  id: number;
-  buildingId: number;
+  id: Id;
+  buildingId: Id;
   name: string;
   unit: string;
   unitPrice: number;
 };
 
 export type BuildingServiceRequest = {
-  buildingId: number;
+  buildingId: Id;
   name: string;
   unit: string;
   unitPrice: number;
@@ -36,45 +37,47 @@ export type BuildingServiceRequest = {
 export type UsageType = "SHARED" | "PERSONAL";
 
 export type ContractService = {
-  id: number;
-  contractId: number;
-  serviceId: number;
+  id: Id;
+  contractId: Id;
+  serviceId: Id;
   serviceName: string;
   quantity: number;
   usageType: UsageType;
-  contractTenantId: number | null;
+  contractTenantId: Id | null;
 };
 
 export type AttachServiceRequest = {
-  contractId: number;
-  serviceId: number;
+  contractId: Id;
+  serviceId: Id;
   quantity: number;
   usageType: UsageType;
   contractTenantId?: number;
 };
 
 export type Meter = {
-  id: number;
-  roomId: number;
-  buildingId: number;
-  utilityTypeId: number;
+  id: Id;
+  roomId: Id;
+  buildingId: Id;
+  utilityTypeId: Id;
   utilityTypeName: string;
   meterCode: string | null;
   initialIndex: number;
+  /** Ngày kỹ thuật ghi mốc bàn giao; null = phòng mới chưa bàn giao. */
+  initialIndexDate: string | null;
   active: boolean;
 };
 
 export type CreateMeterRequest = {
-  roomId: number;
-  utilityTypeId: number;
+  roomId: Id;
+  utilityTypeId: Id;
   meterCode?: string;
   initialIndex: number;
 };
 
 export type MeterReading = {
-  id: number;
-  meterId: number;
-  roomId: number;
+  id: Id;
+  meterId: Id;
+  roomId: Id;
   month: number;
   year: number;
   readingDate: string;
@@ -86,7 +89,7 @@ export type MeterReading = {
 };
 
 export type CreateReadingRequest = {
-  meterId: number;
+  meterId: Id;
   month: number;
   year: number;
   currentIndex: number;
@@ -97,23 +100,67 @@ export type UpdateReadingRequest = {
   currentIndex: number;
 };
 
+export type MeterIndexItem = {
+  meterId: Id;
+  utilityTypeName: string | null;
+  initialIndex: number;
+  initialIndexDate: string | null;
+  currentIndex: number | null;
+};
+
+/** Phòng có khách mới chuyển vào, kỹ thuật cần ghi chỉ số bàn giao. */
+export type HandoverRoom = {
+  contractId: Id;
+  roomId: Id;
+  buildingId: Id;
+  roomNumber: string | null;
+  moveInDate: string;
+  meters: MeterIndexItem[];
+};
+
+/** Phòng còn thiếu chỉ số của kỳ chốt sổ. */
+export type MissingReadingRoom = {
+  roomId: Id;
+  buildingId: Id;
+  roomNumber: string | null;
+  meters: MeterIndexItem[];
+};
+
+export type MeterReadingOverview = {
+  month: number;
+  year: number;
+  dayOfMonth: number;
+  firstFiveDays: boolean;
+  contractsAvailable: boolean;
+  handoverRooms: HandoverRoom[];
+  missingRooms: MissingReadingRoom[];
+};
+
+export type SaveHandoverRequest = {
+  roomId: Id;
+  readingDate?: string;
+  readings: { meterId: Id; currentIndex: number }[];
+};
+
 export type InvoiceItem = {
-  id: number;
+  id: Id;
   itemType: "RENT" | "ELECTRIC" | "WATER" | "SERVICE_SHARED" | "SERVICE_PERSONAL";
   description: string;
   amount: number;
-  meterReadingId: number | null;
-  contractServiceId: number | null;
+  meterReadingId: Id | null;
+  contractServiceId: Id | null;
 };
 
 export type InvoiceStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID" | "OVERDUE";
 
 export type Invoice = {
-  contractId: number;
-  roomId: number;
-  buildingId: number;
-  contractTenantId: number | null;
-  customerId: number;
+  id: Id;
+  roomInvoiceId: Id | null;
+  contractId: Id;
+  roomId: Id;
+  buildingId: Id;
+  contractTenantId: Id | null;
+  customerId: Id;
   month: number;
   year: number;
   totalAmount: number;
@@ -124,14 +171,93 @@ export type Invoice = {
   items: InvoiceItem[];
 };
 
+export type RoomInvoiceShare = {
+  invoiceId: Id;
+  contractTenantId: Id;
+  customerId: Id;
+  /** null khi khách không phải đại diện và đây là phần của người khác. */
+  totalAmount: number | null;
+  paidAmount: number | null;
+  status: InvoiceStatus;
+  dueDate: string;
+  representative: boolean;
+  masked: boolean;
+};
+
+export type RoomInvoice = {
+  id: Id;
+  roomId: Id;
+  buildingId: Id;
+  month: number;
+  year: number;
+  totalAmount: number;
+  paidAmount: number;
+  rentAmount: number;
+  electricAmount: number;
+  waterAmount: number;
+  serviceAmount: number;
+  status: InvoiceStatus;
+  issuedAt: string;
+  dueDate: string;
+  shareCount: number;
+  shares: RoomInvoiceShare[];
+};
+
+export type InvoicePeriodSummary = {
+  billed: number;
+  paid: number;
+  debt: number;
+  invoiceCount: number;
+  paidCount: number;
+  overdueCount: number;
+  rent: number;
+  electric: number;
+  water: number;
+  service: number;
+};
+
+export type InvoiceMonthlyPoint = {
+  month: number;
+  billed: number;
+  paid: number;
+};
+
+export type InvoiceBuildingSummary = {
+  buildingId: Id;
+  billed: number;
+  paid: number;
+  debt: number;
+  invoiceCount: number;
+  overdueCount: number;
+};
+
+export type InvoiceRoomDebt = {
+  roomInvoiceId: Id;
+  roomId: Id;
+  buildingId: Id;
+  outstanding: number;
+  dueDate: string;
+  status: InvoiceStatus;
+};
+
+export type RoomInvoiceSummary = {
+  year: number;
+  month: number;
+  monthSummary: InvoicePeriodSummary;
+  yearSummary: InvoicePeriodSummary;
+  monthly: InvoiceMonthlyPoint[];
+  byBuilding: InvoiceBuildingSummary[];
+  topDebtRooms: InvoiceRoomDebt[];
+};
+
 export type GenerateInvoiceRequest = {
   month: number;
   year: number;
-  buildingId?: number;
+  buildingId?: Id;
 };
 
 export type SkippedRoom = {
-  roomId: number;
+  roomId: Id;
   reason: string;
 };
 
@@ -143,8 +269,8 @@ export type GenerateInvoiceResult = {
 };
 
 export type Payment = {
-  id: number;
-  invoiceId: number;
+  id: Id;
+  invoiceId: Id;
   amountPaid: number;
   method: "CASH";
   paidAt: string;
@@ -153,7 +279,7 @@ export type Payment = {
 };
 
 export type CreatePaymentRequest = {
-  invoiceId: number;
+  invoiceId: Id;
   amountPaid: number;
   paidAt?: string;
   note?: string;
@@ -207,31 +333,31 @@ export const billingApi = {
     apiFetch<UtilityType[]>("/api/v1/utility-types"),
   createUtilityType: (body: UtilityTypeRequest) =>
     apiFetch<UtilityType>("/api/v1/utility-types", { method: "POST", body }),
-  updateUtilityType: (id: number, body: UtilityTypeRequest) =>
+  updateUtilityType: (id: Id, body: UtilityTypeRequest) =>
     apiFetch<UtilityType>(`/api/v1/utility-types/${id}`, { method: "PUT", body }),
 
   /* Building services — staff xem; QUAN_LY/ADMIN tạo/sửa */
-  buildingServices: async (buildingId?: number) =>
+  buildingServices: async (buildingId?: Id) =>
     apiFetch<BuildingService[]>(
       `/api/v1/services${buildingId ? `?buildingId=${buildingId}` : ""}`,
     ),
   createBuildingService: (body: BuildingServiceRequest) =>
     apiFetch<BuildingService>("/api/v1/services", { method: "POST", body }),
-  updateBuildingService: (id: number, body: Omit<BuildingServiceRequest, "buildingId">) =>
+  updateBuildingService: (id: Id, body: BuildingServiceRequest) =>
     apiFetch<BuildingService>(`/api/v1/services/${id}`, { method: "PUT", body }),
 
   /* Contract services — staff xem; QUAN_LY/ADMIN gắn/xóa */
-  contractServices: async (contractId?: number) =>
+  contractServices: async (contractId?: Id) =>
     apiFetch<ContractService[]>(
       `/api/v1/contract-services${contractId ? `?contractId=${contractId}` : ""}`,
     ),
   attachContractService: (body: AttachServiceRequest) =>
     apiFetch<ContractService>("/api/v1/contract-services", { method: "POST", body }),
-  detachContractService: (id: number) =>
+  detachContractService: (id: Id) =>
     apiFetch<void>(`/api/v1/contract-services/${id}`, { method: "DELETE" }),
 
   /* Meters — staff xem; QUAN_LY/ADMIN tạo */
-  meters: async (roomId?: number, buildingId?: number) =>
+  meters: async (roomId?: Id, buildingId?: Id) =>
     apiFetch<Meter[]>(
       `/api/v1/meters${
         roomId || buildingId
@@ -245,24 +371,40 @@ export const billingApi = {
     apiFetch<Meter>("/api/v1/meters", { method: "POST", body }),
 
   /* Meter readings — KY_THUAT/QUAN_LY/ADMIN nhập/sửa; staff xem */
-  meterReadings: async (params: { month?: number; year?: number; buildingId?: number; page?: number; size?: number } = {}) =>
+  meterReadings: async (params: { month?: number; year?: number; buildingId?: Id; page?: number; size?: number } = {}) =>
     toPage(await apiFetch<RawPage<MeterReading>>(`/api/v1/meter-readings${qs(params)}`)),
   createMeterReading: (body: CreateReadingRequest) =>
     apiFetch<MeterReading>("/api/v1/meter-readings", { method: "POST", body }),
-  updateMeterReading: (id: number, body: UpdateReadingRequest) =>
+  updateMeterReading: (id: Id, body: UpdateReadingRequest) =>
     apiFetch<MeterReading>(`/api/v1/meter-readings/${id}`, { method: "PUT", body }),
+  meterReadingOverview: (params: { month?: number; year?: number; buildingId?: Id } = {}) =>
+    apiFetch<MeterReadingOverview>(`/api/v1/meter-readings/overview${qs(params)}`),
+  saveHandover: (body: SaveHandoverRequest) =>
+    apiFetch<void>("/api/v1/meter-readings/handover", { method: "POST", body }),
 
   /* Invoices — QUAN_LY/KY_THUAT/SALE/ADMIN quản lý; CUSTOMER xem của mình */
-  invoices: async (params: { buildingId?: number; roomId?: number; month?: number; year?: number; status?: InvoiceStatus; page?: number; size?: number } = {}) =>
+  invoices: async (params: { buildingId?: Id; roomId?: Id; month?: number; year?: number; status?: InvoiceStatus; page?: number; size?: number } = {}) =>
     toPage(await apiFetch<RawPage<Invoice>>(`/api/v1/invoices${qs(params)}`)),
-  myInvoices: () => apiFetch<Invoice[]>("/api/v1/invoices/mine"),
-  invoiceDetail: (id: number) => apiFetch<Invoice>(`/api/v1/invoices/${id}`),
+  myInvoices: async (params: { month?: number; year?: number; status?: InvoiceStatus; page?: number; size?: number } = {}) =>
+    toPage(await apiFetch<RawPage<Invoice>>(`/api/v1/invoices/mine${qs(params)}`)),
+  invoiceDetail: (id: Id) => apiFetch<Invoice>(`/api/v1/invoices/${id}`),
   generateInvoices: (body: GenerateInvoiceRequest) =>
     apiFetch<GenerateInvoiceResult>("/api/v1/invoices/generate", { method: "POST", body }),
 
+  /* Room invoices — hóa đơn tổng theo phòng (docs 11.4); CUSTOMER xem phòng mình có share */
+  roomInvoices: async (params: { buildingId?: Id; month?: number; year?: number; status?: InvoiceStatus; page?: number; size?: number } = {}) =>
+    toPage(await apiFetch<RawPage<RoomInvoice>>(`/api/v1/room-invoices${qs(params)}`)),
+  myRoomInvoices: async (params: { month?: number; year?: number; status?: InvoiceStatus; page?: number; size?: number } = {}) =>
+    toPage(await apiFetch<RawPage<RoomInvoice>>(`/api/v1/room-invoices/mine${qs(params)}`)),
+  roomInvoiceDetail: (id: Id) => apiFetch<RoomInvoice>(`/api/v1/room-invoices/${id}`),
+  roomInvoiceSummary: (params: { month: number; year: number }) =>
+    apiFetch<RoomInvoiceSummary>(`/api/v1/room-invoices/summary${qs(params)}`),
+
   /* Payments — QUAN_LY/ADMIN ghi tiền mặt; authenticated xem lịch sử */
-  paymentsByInvoice: (invoiceId: number) =>
+  paymentsByInvoice: (invoiceId: Id) =>
     apiFetch<Payment[]>(`/api/v1/payments?invoiceId=${invoiceId}`),
   createPayment: (body: CreatePaymentRequest) =>
     apiFetch<Payment>("/api/v1/payments", { method: "POST", body }),
+  simulatePayment: (body: CreatePaymentRequest) =>
+    apiFetch<Payment>("/api/v1/payments/simulate", { method: "POST", body }),
 };

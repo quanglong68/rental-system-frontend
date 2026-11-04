@@ -87,7 +87,10 @@ export function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   if (initializing) return null;
-  if (user) return <Navigate to={homeFor(user.role)} replace />;
+  // Giữ đích quay lại (?next) cả khi component render lại do user vừa đăng nhập xong:
+  // Navigate ở đây có thể thắng navigate() trong submit và làm mất next.
+  const nextTarget = safeNext(params.get("next"));
+  if (user) return <Navigate to={nextTarget ?? homeFor(user.role)} replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -96,8 +99,7 @@ export function Login() {
     setLoading(true);
     try {
       const u = await login(username, password);
-      const next = safeNext(params.get("next"));
-      navigate(next ?? homeFor(u.role), { replace: true });
+      navigate(nextTarget ?? homeFor(u.role), { replace: true });
     } catch (err) {
       setError(toVnMessage(err));
     } finally {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Field, Icon } from "@/shared/ui";
 import { propertyApi, type BuildingInput, type BuildingStatus, type Province, type Ward } from "@/features/properties/api/propertyApi";
-import { isValidPoint, searchPlaces, type MapPoint, type PlaceResult } from "@/features/properties/api/geocodingApi";
+import { isValidPoint, searchPlaces, type MapPoint, type PlaceResult } from "@/api/geocoding";
 import BuildingLocationMap from "./BuildingLocationMap";
 import BuildingImagesSection, { type PendingBuildingImage } from "./BuildingImagesSection";
 import PropertyBreadcrumbs from "./PropertyBreadcrumbs";

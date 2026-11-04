@@ -1,20 +1,198 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon, PageHead, Pill, Tabs, Toolbar, toVNTime, vnd } from "@/shared/ui";
 import { contractsApi } from "@/features/contracts/api/contractsApi";
+import { bookingApi, type RoommatePost } from "@/api/booking";
+import { getMyProfile } from "@/api/userNotification";
+import { propertyApi } from "@/features/properties/api/propertyApi";
+import { hasAnyRole, useAuth } from "@/features/auth";
+import { errorText } from "@/shared/api/errors";
+import { idStr, type Id } from "@/shared/lib/id";
+import { useBuildingLookup, useCustomerLookup, useRoomLookup } from "@/shared/lib/refLabels";
+
+const errText = (e: unknown) => errorText(e);
+const initialsOf = (name?: string) =>
+  name?.trim()
+    ? name.trim().split(/\s+/).slice(-2).map((word) => word[0]?.toUpperCase() ?? "").join("")
+    : null;
+
+const roommateStatus: Record<RoommatePost["status"], { label: string; tone: "teal" | "slate" }> = {
+  OPEN: { label: "Đang tìm", tone: "teal" },
+  CLOSED: { label: "Đã đóng", tone: "slate" },
+};
 
 type ResidentItem = {
-  tenantId: number;
-  contractId: number;
-  customerId: number;
+  tenantId: Id;
+  contractId: Id;
+  customerId: Id;
   joinedAt: string;
   leftAt: string | null;
   isRepresentative: boolean;
-  roomId: number;
-  buildingId: number;
+  roomId: Id;
+  buildingId: Id;
   startDate: string;
   endDate: string | null;
   rentAmount: number | null;
 };
+
+function RoommateBoard() {
+  const { user } = useAuth();
+  const isAdmin = hasAnyRole(user, ["ADMIN"]);
+  const [buildings, setBuildings] = useState<Id[] | null>(null);
+  const [buildingsError, setBuildingsError] = useState<string | null>(null);
+  const [buildingId, setBuildingId] = useState("");
+  const [posts, setPosts] = useState<RoommatePost[] | null>(null);
+  const [postsError, setPostsError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const roomOf = useRoomLookup((posts ?? []).map((p) => p.roomId));
+  const buildingOf = useBuildingLookup([...(posts ?? []).map((p) => p.buildingId), ...(buildings ?? [])]);
+  const customerOf = useCustomerLookup((posts ?? []).map((p) => p.customerId));
+
+  const loadBuildings = useCallback(async () => {
+    setBuildingsError(null);
+    try {
+      let list: Id[];
+      if (isAdmin) {
+        const page = await propertyApi.buildings(0, 100, "", "", "");
+        list = page.content.map((b) => b.buildingId);
+      } else {
+        const profile = await getMyProfile();
+        list = profile.buildingIds ?? [];
+      }
+      setBuildings(list);
+      if (!isAdmin) setBuildingId(list.length > 0 ? idStr(list[0]) : "");
+    } catch (e) {
+      setBuildings([]);
+      setBuildingId("");
+      setBuildingsError(errText(e));
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    void loadBuildings();
+  }, [loadBuildings]);
+
+  const loadPosts = useCallback(async () => {
+    if (!isAdmin && !buildingId) {
+      setPosts([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setPostsError(null);
+    try {
+      const res = await bookingApi.roommatePosts({
+        buildingId: buildingId || undefined,
+        page: 0,
+        size: 50,
+      });
+      setPosts(res.content ?? []);
+    } catch (e) {
+      setPosts([]);
+      setPostsError(errText(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [buildingId, isAdmin]);
+
+  useEffect(() => {
+    if (buildings === null) return;
+    void loadPosts();
+  }, [buildings, loadPosts]);
+
+  if (buildingsError) {
+    return (
+      <div className="p-10 text-center">
+        <p className="mb-2 text-sm text-red-600">Không tải được phạm vi tòa nhà: {buildingsError}</p>
+        <button className="secondary-button" onClick={() => void loadBuildings()}>Thử lại</button>
+      </div>
+    );
+  }
+
+  if (buildings === null) {
+    return <div className="p-10 text-center text-sm text-muted">Đang tải phạm vi tòa nhà…</div>;
+  }
+
+  if (!isAdmin && buildings.length === 0) {
+    return (
+      <div className="p-10 text-center text-sm text-muted">
+        Tài khoản của bạn chưa được phân công tòa nhà nào nên chưa xem được bài đăng ở ghép.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <Icon name="users" size={15} />
+          Bài đăng tìm người ở ghép do khách thuê tạo, lọc theo tòa nhà.
+        </div>
+        <select
+          className="select !h-9 !w-auto text-xs"
+          value={buildingId}
+          onChange={(e) => setBuildingId(e.target.value)}
+        >
+          {isAdmin && <option value="">Tất cả tòa nhà</option>}
+          {buildings.map((id) => (
+            <option key={idStr(id)} value={idStr(id)}>
+              {buildingOf(id) ?? `Tòa nhà #${id}`}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="p-10 text-center text-sm text-muted">Đang tải bài đăng ở ghép…</div>
+      ) : postsError ? (
+        <div className="p-10 text-center">
+          <p className="mb-2 text-sm text-red-600">Không tải được bài đăng ở ghép: {postsError}</p>
+          <button className="secondary-button" onClick={() => void loadPosts()}>Thử lại</button>
+        </div>
+      ) : !posts || posts.length === 0 ? (
+        <div className="p-10 text-center text-sm text-muted">
+          Chưa có bài đăng tìm người ở ghép nào trong phạm vi đang chọn.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Bài đăng</th>
+                <th>Vị trí</th>
+                <th className="text-right">Ngân sách chia sẻ</th>
+                <th>Trạng thái</th>
+                <th>Ngày tạo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {posts.map((post) => {
+                const status = roommateStatus[post.status];
+                return (
+                  <tr key={idStr(post.id)}>
+                    <td>
+                      <b>{post.title}</b>
+                      <div className="sub max-w-[320px] truncate">{post.description?.trim() || "Không có mô tả"}</div>
+                      <div className="sub">{customerOf(post.customerId) ?? "Khách thuê"}</div>
+                    </td>
+                    <td className="text-[13px]">
+                      <b>Phòng {roomOf(post.roomId)?.code ?? `#${post.roomId}`}</b> · {buildingOf(post.buildingId) ?? `Tòa #${post.buildingId}`}
+                    </td>
+                    <td className="text-right font-bold">{vnd(post.budgetShare)}</td>
+                    <td>
+                      <Pill tone={status?.tone ?? "slate"}>{status?.label ?? post.status}</Pill>
+                    </td>
+                    <td className="text-[13px]">{toVNTime(post.createdAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function Tenants() {
   const [tab, setTab] = useState("Khách thuê");
@@ -26,6 +204,10 @@ export default function Tenants() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [totalContracts, setTotalContracts] = useState(0);
+
+  const roomOf = useRoomLookup(residents.map((r) => r.roomId));
+  const buildingOf = useBuildingLookup(residents.map((r) => r.buildingId));
+  const customerOf = useCustomerLookup(residents.map((r) => r.customerId));
 
   const loadData = useCallback(async (targetPage = page) => {
     setLoading(true);
@@ -165,9 +347,9 @@ export default function Tenants() {
                     <tr key={`${r.contractId}-${r.tenantId}-${r.customerId}`}>
                       <td>
                         <div className="flex items-center gap-3">
-                          <span className="avatar-chip !h-9 !w-9 font-mono">#{r.customerId}</span>
+                          <span className="avatar-chip !h-9 !w-9">{initialsOf(customerOf(r.customerId)) ?? String(r.customerId).slice(-2)}</span>
                           <div>
-                            <b>Khách #{r.customerId}</b>
+                            <b>{customerOf(r.customerId) ?? "Khách thuê"}</b>
                             <div className="sub">Mã cư dân #{r.tenantId}</div>
                           </div>
                         </div>
@@ -183,7 +365,7 @@ export default function Tenants() {
                         </div>
                       </td>
                       <td className="text-[13px]">
-                        <b>Phòng #{r.roomId}</b> · Tòa #{r.buildingId}
+                        <b>Phòng {roomOf(r.roomId)?.code ?? `#${r.roomId}`}</b> · {buildingOf(r.buildingId) ?? `Tòa #${r.buildingId}`}
                         <div className="sub text-xs text-muted">HĐ #{r.contractId}</div>
                       </td>
                       <td className="text-[13px]">
@@ -233,16 +415,9 @@ export default function Tenants() {
           )}
         </article>
       ) : (
-        <div className="rounded-2xl border border-line bg-white p-12 text-center">
-          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-amber-50 text-amber-600">
-            <Icon name="users" size={28} />
-          </div>
-          <h2 className="text-xl font-bold">Dịch vụ tìm người ở ghép chưa được kết nối</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-muted">
-            Tính năng đăng bài và duyệt hồ sơ ở ghép (thuộc <code>listing-booking-service</code> tại cổng 8084) hiện chưa có service backend hoạt động.
-            Hệ thống sẽ cập nhật khi dịch vụ được phát hành.
-          </p>
-        </div>
+        <article className="panel">
+          <RoommateBoard />
+        </article>
       )}
     </>
   );

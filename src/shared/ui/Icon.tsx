@@ -30,9 +30,15 @@ export type IconName =
   | "edit"
   | "trash"
   | "image"
-  | "refresh";
+  | "refresh"
+  | "chat"
+  | "send"
+  | "inbox"
+  | "alert"
+  | "minimize"
+  | "chevron-left";
 
-export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
+export function Icon({ name, size = 20, className }: { name: IconName; size?: number; className?: string }) {
   const paths: Record<IconName, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
     building: <><path d="M4 21V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v16" /><path d="M9 21v-4h3v4M8 7h2m3 0h1M8 11h2m3 0h1M2 21h20M17 9h2a2 2 0 0 1 2 2v10" /></>,
@@ -64,6 +70,27 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></>,
     image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1.5" /><path d="m21 15-6-6L3 21" /></>,
     refresh: <><path d="M20 7a9 9 0 0 0-15-2L3 7m0-5v5h5M4 17a9 9 0 0 0 15 2l2-2m0 5v-5h-5" /></>,
+    chat: <><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 10h8M8 14h5" /></>,
+    send: <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></>,
+    inbox: <><path d="M4 4h16l2 11a2 2 0 0 1-2 2h-4l-2 3h-4l-2-3H4a2 2 0 0 1-2-2Z" /><path d="M2 13h6l2 3h4l2-3h6" /></>,
+    alert: <><path d="M12 3 2 20h20Z" /><path d="M12 9v5M12 17h.01" /></>,
+    minimize: <path d="M5 12h14" />,
+    "chevron-left": <path d="m15 18-6-6 6-6" />,
   };
-  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {paths[name]}
+    </svg>
+  );
 }

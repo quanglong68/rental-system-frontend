@@ -87,6 +87,160 @@ function tryRefresh(): Promise<boolean> {
 }
 
 /**
+ * Fetch nhị phân (ảnh/PDF) có Bearer + refresh 1 lần khi 401.
+ */
+export async function apiBlob(path: string, options: ApiOptions = {}): Promise<Blob> {
+  const { headers, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
+  const cid = newCorrelationId();
+
+  const doFetch = async (token: string | null): Promise<Response> => {
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abortFromCaller();
+    else signal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timer = window.setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
+    try {
+      return await fetch(`${API_BASE}${path}`, {
+        signal: controller.signal,
+        headers: {
+          "X-Correlation-Id": cid,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(headers ?? {}),
+        },
+      });
+    } finally {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromCaller);
+    }
+  };
+
+  let res: Response;
+  try {
+    res = await doFetch(getAccessToken());
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError("REQUEST_TIMEOUT", "Máy chủ phản hồi quá lâu. Vui lòng thử lại.", 408, cid);
+    }
+    if (signal?.aborted) throw error;
+    throw new ApiError("DEPENDENCY_UNAVAILABLE", "Không kết nối được máy chủ. Kiểm tra mạng hoặc thử lại.", 503, cid);
+  }
+
+  if (res.status === 401 && !path.endsWith("/auth/refresh")) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      res = await doFetch(getAccessToken());
+    }
+  }
+
+  if (res.ok) return res.blob();
+
+  let errBody: unknown = null;
+  try {
+    const text = await res.text();
+    errBody = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    errBody = null;
+  }
+  throw toApiError(res.status, errBody, `Yêu cầu thất bại (HTTP ${res.status}).`);
+}
+
+export type EventStreamHandlers = {
+  signal?: AbortSignal;
+  onOpen?: () => void;
+  onEvent: (event: string, data: unknown) => void;
+};
+
+/**
+ * Mở luồng SSE bằng fetch vì EventSource không gửi được Authorization.
+ * Hàm kết thúc khi server đóng luồng hoặc caller abort; lỗi HTTP/mạng ném ApiError
+ * để lớp gọi quyết định reconnect.
+ */
+export async function apiEventStream(path: string, handlers: EventStreamHandlers): Promise<void> {
+  const { signal, onOpen, onEvent } = handlers;
+  const cid = newCorrelationId();
+
+  const doFetch = (token: string | null) =>
+    fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+        "X-Correlation-Id": cid,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal,
+    });
+
+  let res: Response;
+  try {
+    res = await doFetch(getAccessToken());
+    if (res.status === 401) {
+      const refreshed = await tryRefresh();
+      if (refreshed) res = await doFetch(getAccessToken());
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError("DEPENDENCY_UNAVAILABLE", "Không kết nối được máy chủ. Kiểm tra mạng hoặc thử lại.", 503, cid);
+  }
+
+  if (!res.ok) {
+    let errBody: unknown = null;
+    try {
+      const text = await res.text();
+      errBody = text ? (JSON.parse(text) as unknown) : null;
+    } catch {
+      errBody = null;
+    }
+    throw toApiError(res.status, errBody, `Không mở được kênh realtime (HTTP ${res.status}).`);
+  }
+  if (!res.body) throw new ApiError("INTERNAL_ERROR", "Trình duyệt không hỗ trợ luồng realtime.", res.status, cid);
+
+  onOpen?.();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatch = (chunk: string) => {
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of chunk.split(/\r?\n/)) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+    }
+    if (dataLines.length === 0) return;
+    const raw = dataLines.join("\n");
+    let data: unknown = raw;
+    try {
+      data = JSON.parse(raw) as unknown;
+    } catch {
+      // Giữ nguyên chuỗi nếu server không trả JSON.
+    }
+    onEvent(event, data);
+  };
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      for (;;) {
+        const sep = buffer.match(/\r?\n\r?\n/);
+        if (!sep || sep.index === undefined) break;
+        const chunk = buffer.slice(0, sep.index);
+        buffer = buffer.slice(sep.index + sep[0].length);
+        dispatch(chunk);
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError("DEPENDENCY_UNAVAILABLE", "Kết nối realtime bị ngắt.", 503, cid);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * Fetch chuẩn: gắn Bearer + X-Correlation-Id, parse ErrorResponse,
  * tự refresh 1 lần khi 401 (trừ chính /refresh).
  */

@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "@/features/auth";
-import { ApiError } from "@/shared/api/httpClient";
-import { Field, Icon, PageHead } from "@/shared/ui";
+import { errorText } from "@/shared/api/errors";
+import { Field, Icon, PageHead, formatMoneyInput, parseMoneyInput } from "@/shared/ui";
 import { propertyApi, type BuildingSearchResult, type Room } from "@/features/properties/api/propertyApi";
 import { contractsApi, type CreateDraftManualRequest } from "@/features/contracts/api/contractsApi";
+import { CustomerPicker } from "./CustomerPicker";
 
-const errText = (e: unknown) =>
-  e instanceof ApiError ? `${e.code} · ${e.message}` : e instanceof Error ? e.message : "Đã xảy ra lỗi.";
+const errText = (e: unknown) => errorText(e);
 
 type FormState = {
   customerId: string;
   buildingId: string;
   roomId: string;
   startDate: string;
+  endDate: string;
   rentAmount: string;
+  depositAmount: string;
 };
 
 const emptyForm: FormState = {
@@ -22,7 +24,9 @@ const emptyForm: FormState = {
   buildingId: "",
   roomId: "",
   startDate: "",
+  endDate: "",
   rentAmount: "",
+  depositAmount: "",
 };
 
 export default function CreateDraftContractPage() {
@@ -103,20 +107,22 @@ export default function CreateDraftContractPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.buildingId]);
 
-  const customerIdNum = Number(form.customerId);
-  const rentAmountNum = Number(form.rentAmount);
+  const customerId = form.customerId.trim();
+  const rentAmountNum = parseMoneyInput(form.rentAmount);
+  const depositAmountNum = form.depositAmount.trim() ? parseMoneyInput(form.depositAmount) : null;
 
   const isValid =
-    form.customerId.trim() !== "" &&
-    Number.isInteger(customerIdNum) &&
-    customerIdNum > 0 &&
+    customerId !== "" &&
     form.buildingId !== "" &&
     form.roomId !== "" &&
     rooms.some((r) => r.id === form.roomId) &&
     form.startDate !== "" &&
+    form.endDate !== "" &&
+    form.endDate > form.startDate &&
     form.rentAmount.trim() !== "" &&
     Number.isInteger(rentAmountNum) &&
-    rentAmountNum > 0;
+    rentAmountNum > 0 &&
+    (depositAmountNum == null || (Number.isInteger(depositAmountNum) && depositAmountNum >= 0));
 
   const canSubmit = isValid && !buildingsLoading && !roomsLoading && !submitting;
 
@@ -128,11 +134,13 @@ export default function CreateDraftContractPage() {
     setSubmitError("");
 
     const body: CreateDraftManualRequest = {
-      customerId: customerIdNum,
-      buildingId: Number(form.buildingId),
-      roomId: Number(form.roomId),
+      customerId,
+      buildingId: form.buildingId,
+      roomId: form.roomId,
       startDate: form.startDate,
+      endDate: form.endDate,
       rentAmount: rentAmountNum,
+      depositAmount: depositAmountNum ?? undefined,
     };
 
     try {
@@ -156,19 +164,11 @@ export default function CreateDraftContractPage() {
       <div className="panel" style={{ maxWidth: 640 }}>
         <form onSubmit={handleSubmit} noValidate>
           <div className="form-grid">
-            {/* Customer ID */}
-            <Field
-              label="Mã khách hàng (ID)"
-              hint="Nhập ID số của khách hàng (customerId). Hệ thống không cung cấp danh sách khách hàng qua giao diện này."
-            >
-              <input
-                inputMode="numeric"
-                value={form.customerId}
-                onChange={(e) => setForm({ ...form, customerId: e.target.value })}
-                placeholder="Ví dụ: 42"
-                aria-required="true"
-              />
-            </Field>
+            {/* Customer picker */}
+            <CustomerPicker
+              value={form.customerId}
+              onChange={(customerId) => setForm({ ...form, customerId })}
+            />
 
             {/* Building select */}
             <Field label="Tòa nhà">
@@ -239,19 +239,50 @@ export default function CreateDraftContractPage() {
               />
             </Field>
 
-            {/* Rent amount */}
-            <Field label="Giá thuê (VNĐ)" hint="Nhập số nguyên dương, không dấu thập phân.">
+            {/* End date — required: the backend only signs drafts that carry one */}
+            <Field
+              label="Ngày kết thúc"
+              error={form.endDate && form.startDate && form.endDate <= form.startDate ? "Ngày kết thúc phải sau ngày bắt đầu." : undefined}
+            >
               <input
-                type="number"
-                min="1"
-                step="1"
+                type="date"
+                value={form.endDate}
+                min={form.startDate || undefined}
+                aria-required="true"
+                onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+              />
+            </Field>
+
+            {/* Rent amount */}
+            <Field
+              label="Giá thuê (VNĐ)"
+              hint={form.rentAmount ? `${parseMoneyInput(form.rentAmount).toLocaleString("vi-VN")} ₫ / tháng` : "Nhập số tiền thuê hàng tháng"}
+            >
+              <input
+                inputMode="numeric"
                 value={form.rentAmount}
                 aria-required="true"
-                onChange={(e) => setForm({ ...form, rentAmount: e.target.value })}
-                placeholder="Ví dụ: 5000000"
+                onChange={(e) => setForm({ ...form, rentAmount: formatMoneyInput(e.target.value) })}
+                placeholder="Ví dụ: 5.000.000"
+                className="font-semibold text-slate-800"
+              />
+            </Field>
+
+            {/* Deposit amount */}
+            <Field
+              label="Tiền cọc (VNĐ)"
+              hint={form.depositAmount ? `${parseMoneyInput(form.depositAmount).toLocaleString("vi-VN")} ₫` : "Không bắt buộc; bỏ trống nếu chưa chốt cọc"}
+            >
+              <input
+                inputMode="numeric"
+                value={form.depositAmount}
+                onChange={(e) => setForm({ ...form, depositAmount: formatMoneyInput(e.target.value) })}
+                placeholder="Ví dụ: 5.000.000"
+                className="font-semibold text-slate-800"
               />
             </Field>
           </div>
+
 
           {submitError && (
             <div className="alert alert-error mt-4">
