@@ -5,8 +5,12 @@ import {
   getStaff,
   updateStaff,
   replaceStaffBuildings,
+  type PageResponse,
   type UserProfile,
 } from "@/api/userNotification";
+import { hasAnyRole, useAuth } from "@/features/auth";
+import { propertyApi } from "@/features/properties/api/propertyApi";
+import { useBuildingLookup } from "@/shared/lib/refLabels";
 
 const roleOptions: Record<string, { label: string; tone: Tone }> = {
   QUAN_LY: { label: "Quản lý", tone: "violet" },
@@ -25,12 +29,43 @@ function resolveRole(position: string | null, isAdmin: boolean | null): string {
   return position in roleOptions ? position : "SALE";
 }
 
+const ROLE_PRIORITY = ["ADMIN", "QUAN_LY", "KY_THUAT", "SALE"];
+
+type AccountSummary = { accountId: number | string; roles: string[] };
+
+/** Hồ sơ staff do user-notification tạo bất đồng bộ từ event AccountRegistered. */
+async function waitForStaffProfile(id: number | string, attempts = 15, delayMs = 300): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const first = await getStaff(0, 100);
+      const totalPages = first.totalPages || 1;
+      const batches = totalPages > 1 ? [first, await getStaff(totalPages - 1, 100)] : [first];
+      if (batches.some((page) => page.content.some((s) => String(s.id) === String(id)))) return true;
+    } catch {
+      // Lỗi tạm thời khi service vừa khởi động — thử lại.
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return false;
+}
+
 export default function Staff() {
+  const { user } = useAuth();
+  const isAdmin = hasAnyRole(user, ["ADMIN"]);
   const [tab, setTab] = useState("Tất cả");
   const [staffList, setStaffList] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [buildingOptions, setBuildingOptions] = useState<{ id: string; name: string }[]>([]);
+  const [accountRoles, setAccountRoles] = useState<Record<string, string[]>>({});
+
+  const buildingOf = useBuildingLookup(staffList.flatMap((s) => s.buildingIds ?? []));
+
+  const roleKeyOf = (s: UserProfile) => {
+    const roles = accountRoles[String(s.id)] ?? [];
+    return ROLE_PRIORITY.find((r) => roles.includes(r)) ?? resolveRole(s.position, s.isAdmin);
+  };
 
   const [edit, setEdit] = useState<UserProfile | "new" | null>(null);
   const [formName, setFormName] = useState("");
@@ -38,7 +73,7 @@ export default function Staff() {
   const [formPhone, setFormPhone] = useState("");
   const [formPassword, setFormPassword] = useState("");
   const [formRole, setFormRole] = useState("SALE");
-  const [formBuildings, setFormBuildings] = useState<string>("");
+  const [formBuildings, setFormBuildings] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -50,18 +85,51 @@ export default function Staff() {
     try {
       const res = await getStaff(0, 100);
       setStaffList(res.content || []);
+      if (isAdmin) {
+        // Role thật nằm ở auth-service; hồ sơ user-notification chỉ có position hiển thị.
+        try {
+          const [staffAccounts, adminAccounts] = await Promise.all([
+            apiFetch<PageResponse<AccountSummary>>("/api/v1/auth/accounts?accountType=STAFF&page=0&size=100"),
+            apiFetch<PageResponse<AccountSummary>>("/api/v1/auth/accounts?accountType=ADMIN&page=0&size=100"),
+          ]);
+          const rolesById: Record<string, string[]> = {};
+          for (const account of [...staffAccounts.content, ...adminAccounts.content]) {
+            rolesById[String(account.accountId)] = account.roles || [];
+          }
+          setAccountRoles(rolesById);
+        } catch {
+          setAccountRoles({});
+        }
+      }
     } catch {
       setError("Không thể tải danh sách nhân sự từ máy chủ.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    propertyApi
+      .buildings(0, 100, "", "", "")
+      .then((res) => {
+        if (!cancelled) {
+          setBuildingOptions(res.content.map((b) => ({ id: String(b.buildingId), name: b.name })));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
   const openForm = (x: UserProfile | "new") => {
+    if (!isAdmin) return;
     setEdit(x);
     setFormError("");
     if (x === "new") {
@@ -70,14 +138,14 @@ export default function Staff() {
       setFormPhone("");
       setFormPassword("");
       setFormRole("SALE");
-      setFormBuildings("");
+      setFormBuildings([]);
     } else {
       setFormName(x.fullName || "");
       setFormEmail(x.email || "");
       setFormPhone(x.phone || "");
       setFormPassword("");
-      setFormRole(resolveRole(x.position, x.isAdmin));
-      setFormBuildings((x.buildingIds || []).join(", "));
+      setFormRole(roleKeyOf(x));
+      setFormBuildings((x.buildingIds || []).map(String));
     }
   };
 
@@ -87,11 +155,7 @@ export default function Staff() {
       setFormError("Vui lòng nhập họ tên.");
       return;
     }
-    const buildingIdList = formBuildings
-      .split(/[,;\s]+/)
-      .map((s) => s.trim())
-      .filter((s) => /^\d+$/.test(s))
-      .map(Number);
+    const buildingIdList = formBuildings;
 
     setSaving(true);
     try {
@@ -107,7 +171,7 @@ export default function Staff() {
           return;
         }
         const username = (formEmail.trim() || formPhone.trim()).toLowerCase();
-        await apiFetch("/api/v1/auth/accounts", {
+        const created = await apiFetch<{ accountId: number | string }>("/api/v1/auth/accounts", {
           method: "POST",
           body: {
             username,
@@ -119,9 +183,33 @@ export default function Staff() {
             roles: [formRole],
           },
         });
-        show("Đã tạo tài khoản nhân viên.");
+
+        // Hồ sơ staff được user-notification tạo sau khi nhận event AccountRegistered.
+        const profileReady = await waitForStaffProfile(created.accountId);
+        if (!profileReady) {
+          show("Đã tạo tài khoản nhân viên. Hồ sơ chưa kịp đồng bộ, vui lòng tải lại trang sau ít phút.");
+          setEdit(null);
+          await loadData();
+          return;
+        }
+
+        try {
+          await updateStaff(created.accountId, {
+            fullName: formName.trim(),
+            phone: formPhone.trim() || null,
+            email: formEmail.trim() || null,
+            position: formRole,
+          });
+          await replaceStaffBuildings(created.accountId, buildingIdList);
+          show("Đã tạo tài khoản nhân viên.");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Lỗi đồng bộ hồ sơ nhân viên";
+          show(`Đã tạo tài khoản nhưng chưa lưu được hồ sơ/phân công: ${msg}. Mở "Sửa" để cập nhật lại.`);
+        }
+        setEdit(null);
+        await loadData();
       } else if (edit) {
-        const currentRole = resolveRole(edit.position, edit.isAdmin);
+        const currentRole = roleKeyOf(edit);
         const roleChanged = formRole !== currentRole;
 
         // B1: Cập nhật role thật trong auth-service (nếu role thay đổi)
@@ -190,7 +278,7 @@ export default function Staff() {
 
   const q = query.trim().toLowerCase();
   const filtered = staffList.filter((s) => {
-    const roleKey = resolveRole(s.position, s.isAdmin);
+    const roleKey = roleKeyOf(s);
     const matchesTab =
       tab === "Tất cả" ||
       (tab === "Quản lý" && roleKey === "QUAN_LY") ||
@@ -205,20 +293,26 @@ export default function Staff() {
   });
 
   const countByRole = (r: string) =>
-    staffList.filter((s) => resolveRole(s.position, s.isAdmin) === r).length;
+    staffList.filter((s) => roleKeyOf(s) === r).length;
 
   const m = edit && edit !== "new" ? edit : null;
 
   return (
     <>
       <PageHead
-        eyebrow="ADMIN · Toàn hệ thống"
+        eyebrow={isAdmin ? "ADMIN · Toàn hệ thống" : "Nhân sự · Theo phân công"}
         title="Nhân sự"
-        desc="Quản lý nhân sự, vai trò QUAN_LY / KY_THUAT / SALE và phân công theo tòa nhà từ dữ liệu thực tế."
+        desc={
+          isAdmin
+            ? "Quản lý nhân sự, vai trò QUAN_LY / KY_THUAT / SALE và phân công theo tòa nhà từ dữ liệu thực tế."
+            : "Danh sách nhân sự trong phạm vi tòa nhà bạn phụ trách. Chỉ quản trị viên mới được thêm hoặc sửa hồ sơ."
+        }
         actions={
-          <button className="primary-button" onClick={() => openForm("new")}>
-            <Icon name="plus" size={16} /> Thêm nhân viên
-          </button>
+          isAdmin ? (
+            <button className="primary-button" onClick={() => openForm("new")}>
+              <Icon name="plus" size={16} /> Thêm nhân viên
+            </button>
+          ) : undefined
         }
       />
       <section className="stats-grid mb-6">
@@ -258,11 +352,11 @@ export default function Staff() {
               </thead>
               <tbody>
                 {filtered.map((s) => {
-                  const roleKey = resolveRole(s.position, s.isAdmin);
+                  const roleKey = roleKeyOf(s);
                   const roleCfg = roleOptions[roleKey] || { label: s.position || "Staff", tone: "slate" as Tone };
                   const buildingsText =
                     s.buildingIds && s.buildingIds.length > 0
-                      ? s.buildingIds.map((id) => `Tòa #${id}`).join(", ")
+                      ? s.buildingIds.map((id) => buildingOf(id) ?? `Tòa #${id}`).join(", ")
                       : "Chưa phân công";
 
                   return (
@@ -284,9 +378,11 @@ export default function Staff() {
                       <td className="text-[13px]">{buildingsText}</td>
                       <td className="text-[13px] font-mono">{s.phone || "—"}</td>
                       <td>
-                        <button className="text-button" onClick={() => openForm(s)}>
-                          Sửa <Icon name="chevron" size={12} />
-                        </button>
+                        {isAdmin && (
+                          <button className="text-button" onClick={() => openForm(s)}>
+                            Sửa <Icon name="chevron" size={12} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -298,7 +394,7 @@ export default function Staff() {
       </article>
 
       <Drawer
-        open={!!edit}
+        open={isAdmin && !!edit}
         eyebrow="Nhân sự"
         title={m ? m.fullName : "Thêm nhân viên"}
         onClose={() => setEdit(null)}
@@ -353,38 +449,67 @@ export default function Staff() {
           )}
           <div className="span-2">
             <Field label="Vai trò">
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(roleOptions)
-                  .filter(([k]) => k !== "ADMIN")
-                  .map(([k, v]) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setFormRole(k)}
-                      className={`rounded-xl border p-3 text-left transition ${
-                        formRole === k
-                          ? "border-teal bg-[#eef8f4] ring-2 ring-teal/20"
-                          : "border-line"
-                      }`}
-                    >
-                      <b className="block text-sm">{v.label}</b>
-                      <span className="font-mono text-[10px] text-muted">{k}</span>
-                    </button>
-                  ))}
-              </div>
+              {m?.isAdmin ? (
+                <div className="rounded-xl border border-line p-3 text-sm text-muted">
+                  Tài khoản quản trị (ADMIN) — vai trò do auth-service quản lý, không đổi tại đây.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(roleOptions)
+                    .filter(([k]) => k !== "ADMIN")
+                    .map(([k, v]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setFormRole(k)}
+                        className={`rounded-xl border p-3 text-left transition ${
+                          formRole === k
+                            ? "border-teal bg-[#eef8f4] ring-2 ring-teal/20"
+                            : "border-line"
+                        }`}
+                      >
+                        <b className="block text-sm">{v.label}</b>
+                        <span className="font-mono text-[10px] text-muted">{k}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
             </Field>
           </div>
-          {m && (
+          {(m || edit === "new") && (
             <div className="span-2">
               <Field
-                label="ID các tòa nhà phụ trách"
-                hint="Nhập danh sách ID các tòa nhà, phân cách bằng dấu phẩy (vd: 1, 2, 3)"
+                label="Tòa nhà phụ trách"
+                hint={
+                  buildingOptions.length > 0
+                    ? "Chọn các tòa nhà nhân sự phụ trách."
+                    : "Chưa tải được danh sách tòa nhà — nhập ID cách nhau bằng dấu phẩy (vd: 1, 2, 3)."
+                }
               >
-                <input
-                  value={formBuildings}
-                  onChange={(e) => setFormBuildings(e.target.value)}
-                  placeholder="1, 2, 3"
-                />
+                {buildingOptions.length > 0 ? (
+                  <div className="grid max-h-56 gap-1 overflow-y-auto rounded-xl border border-line p-2">
+                    {buildingOptions.map((b) => (
+                      <label key={b.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formBuildings.includes(b.id)}
+                          onChange={(e) =>
+                            setFormBuildings((prev) =>
+                              e.target.checked ? [...prev, b.id] : prev.filter((id) => id !== b.id),
+                            )
+                          }
+                        />
+                        {b.name}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    value={formBuildings.join(", ")}
+                    onChange={(e) => setFormBuildings(e.target.value.split(/[,;\s]+/).filter(Boolean))}
+                    placeholder="1, 2, 3"
+                  />
+                )}
               </Field>
             </div>
           )}

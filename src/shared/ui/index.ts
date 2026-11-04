@@ -1,3 +1,4 @@
 export * from "./Icon";
 export * from "./primitives";
-export { vnd, toVNTime, todayVN } from "@/shared/lib/format";
+export { default as SignaturePad } from "./SignaturePad";
+export { vnd, toVNTime, todayVN, formatMoneyInput, parseMoneyInput } from "@/shared/lib/format";

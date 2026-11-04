@@ -3,19 +3,19 @@ import type { Role } from "@/features/auth";
 const sectionRoles: Record<string, readonly Role[]> = {
   overview: ["ADMIN", "QUAN_LY"],
   buildings: ["ADMIN"],
+  "room-details": ["ADMIN", "QUAN_LY", "SALE"],
   rooms: ["ADMIN", "QUAN_LY", "SALE"],
   contracts: ["ADMIN", "QUAN_LY", "SALE"],
-  finance: ["ADMIN"],
   maintenance: ["ADMIN", "QUAN_LY", "SALE"],
-  assets: ["ADMIN", "QUAN_LY", "KY_THUAT"],
   tenants: ["ADMIN", "QUAN_LY"],
-  staff: ["ADMIN"],
-  reports: ["ADMIN"],
-  "meter-readings": ["QUAN_LY"],
-  invoices: ["QUAN_LY"],
+  staff: ["ADMIN", "QUAN_LY", "SALE"],
+  "meter-readings": ["ADMIN", "QUAN_LY", "KY_THUAT"],
+  invoices: ["ADMIN", "QUAN_LY", "SALE"],
   "my-tasks": ["KY_THUAT"],
   "maintenance-board": ["KY_THUAT"],
-  leads: ["SALE"],
+  leads: ["ADMIN", "QUAN_LY", "SALE"],
+  messages: ["ADMIN", "QUAN_LY", "SALE"],
+  notifications: ["ADMIN", "QUAN_LY", "SALE", "KY_THUAT"],
 };
 
 export function canAccessAdminSection(roles: readonly string[], section: string): boolean {

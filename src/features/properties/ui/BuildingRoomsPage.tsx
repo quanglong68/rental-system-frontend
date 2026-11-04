@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState, type FormEvent} from "react";
-import {Link, Navigate, useNavigate, useParams} from "react-router";
-import {Drawer, Field, Icon, PageHead, Pill, vnd} from "@/shared/ui";
+import {Link, Navigate, useParams} from "react-router";
+import {Drawer, Field, Icon, PageHead, Pill, vnd, formatMoneyInput, parseMoneyInput} from "@/shared/ui";
+import {hasAnyRole, useAuth} from "@/features/auth";
 import {
     propertyApi,
     type Building,
@@ -22,7 +23,8 @@ export const roomStatuses = {
 
 export default function BuildingRoomsPage() {
     const {buildingId} = useParams();
-    const navigate = useNavigate();
+    const {user} = useAuth();
+    const canManageRooms = hasAnyRole(user, ["ADMIN", "QUAN_LY"]);
     const [confirmationPopup, confirm] = usePropertyConfirm();
     const [building, setBuilding] = useState<Building | null>(null);
     const [result, setResult] = useState<Page<Room> | null>(null);
@@ -112,14 +114,14 @@ export default function BuildingRoomsPage() {
         return () => controller.abort();
     }, [buildingId, page, sort, reload]);
     const rooms = useMemo(() => result?.content.filter((room) => room.roomCode.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi")) && (!status || room.status === status)) ?? [], [result, search, status]);
-    if (!buildingId) return <Navigate to="/admin/buildings" replace/>;
+    if (!buildingId) return <Navigate to="/admin/rooms" replace/>;
     return <>
-        <PropertyBreadcrumbs building={building} rooms/>
+        <PropertyBreadcrumbs building={building}/>
         <PageHead eyebrow="" title={building?.name ?? (loading ? "Đang tải tòa nhà…" : "Tòa nhà")}
                   desc={building?.address ?? "Danh sách phòng thuộc tòa nhà."}
-                  actions={<><Link className="secondary-button" to="/admin/buildings">Quay lại danh sách tòa nhà</Link>
-                      <button className="primary-button" onClick={openCreate}><Icon name="plus" size={16}/> Thêm phòng
-                      </button>
+                  actions={<><Link className="secondary-button" to="/admin/rooms">Danh sách phòng</Link>
+                      {canManageRooms && <button className="primary-button" onClick={openCreate}><Icon name="plus" size={16}/> Thêm phòng
+                      </button>}
                   </>}/>
         {error && <div className="panel property-state" role="alert"><p>{error}</p>
             <button className="secondary-button" onClick={() => setReload((value) => value + 1)}>Thử lại</button>
@@ -185,7 +187,7 @@ export default function BuildingRoomsPage() {
                     <span>Trang {page + 1}/{result.totalPages} · {result.totalElements} phòng</span>
                     <button className="secondary-button" disabled={page === 0} onClick={() => setPage(page - 1)}>Trước
                     </button>
-                    <button className="secondary-button" disabled={result.last} onClick={() => setPage(page + 1)}>Sau
+                    <button className="secondary-button" disabled={page + 1 >= result.totalPages} onClick={() => setPage(page + 1)}>Sau
                     </button>
                 </div>}
             </section>
@@ -229,10 +231,10 @@ export default function BuildingRoomsPage() {
                                                                                                 ...form,
                                                                                                 bathroomCount: Number(event.target.value)
                                                                                             })}/></Field><Field
-                label="Giá cơ bản (₫)"><input required type="number" min={0} value={form.basePrice}
+                label="Giá cơ bản (₫)" hint={form.basePrice ? `${parseMoneyInput(form.basePrice).toLocaleString("vi-VN")} ₫` : undefined}><input required inputMode="numeric" value={formatMoneyInput(form.basePrice)}
                                               onChange={(event) => setForm({
                                                   ...form,
-                                                  basePrice: Number(event.target.value)
+                                                  basePrice: parseMoneyInput(event.target.value)
                                               })}/></Field><Field label="Trạng thái"><select value={form.status}
                                                                                              onChange={(event) => setForm({
                                                                                                  ...form,

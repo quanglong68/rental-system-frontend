@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Id } from "@/shared/lib/id";
 import { AnimatePresence, motion } from "motion/react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Icon, toVNTime } from "@/shared/ui";
@@ -10,19 +11,22 @@ import {
   type NotificationItem,
 } from "@/api/userNotification";
 import { useAuth } from "@/features/auth";
+import { useChatRealtime } from "@/features/chat";
+import ChatDock from "@/features/chat/ui/ChatDock";
 import "./customer.css";
 
 const publicTabs = [{ to: "/", label: "Khám phá", icon: "search" as const }];
 const memberTabs = [
   ...publicTabs,
   { to: "/my-room", label: "Phòng của tôi", icon: "home" as const },
-  { to: "/requests", label: "Lịch hẹn", icon: "calendar" as const },
+  { to: "/requests", label: "Yêu cầu", icon: "calendar" as const },
   { to: "/repairs", label: "Sửa chữa", icon: "tools" as const },
   { to: "/roommates", label: "Ở ghép", icon: "users" as const },
 ];
 
 export default function CustomerLayout() {
   const { user, logout } = useAuth();
+  const { unreadCount: chatUnread } = useChatRealtime();
   const loc = useLocation();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
@@ -48,7 +52,7 @@ export default function CustomerLayout() {
     void fetchNotis();
   }, [fetchNotis]);
 
-  const handleMarkRead = async (id: number) => {
+  const handleMarkRead = async (id: Id) => {
     try {
       await markNotificationRead(id);
       setNotis((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
@@ -83,6 +87,16 @@ export default function CustomerLayout() {
           </nav>
           {user ? (
             <div className="relative flex items-center gap-2">
+              {isCustomer && (
+                <Link
+                  to="/messages"
+                  className="cx-icon"
+                  aria-label={chatUnread > 0 ? `Tin nhắn (${chatUnread} chưa đọc)` : "Tin nhắn"}
+                >
+                  <Icon name="chat" size={18} />
+                  {chatUnread > 0 && <span className="cx-count">{chatUnread > 9 ? "9+" : chatUnread}</span>}
+                </Link>
+              )}
               {isCustomer && <button className="cx-icon" aria-label="Thông báo" onClick={() => { setBell(!bell); setMenu(false); }}><Icon name="bell" size={18} />{unread > 0 && <i />}</button>}
               <button className="cx-avatar" onClick={() => { setMenu(!menu); setBell(false); }}>{initials}</button>
               <AnimatePresence>
@@ -93,7 +107,25 @@ export default function CustomerLayout() {
                       <p className="py-4 text-center text-xs text-muted">Không có thông báo mới.</p>
                     ) : (
                       notis.slice(0, 4).map((n) => (
-                        <div key={n.id} className={`cx-noti ${n.isRead ? "read" : ""}`} onClick={() => void handleMarkRead(n.id)}>
+                        <div
+                          key={n.id}
+                          className={`cx-noti ${n.isRead ? "read" : ""} cursor-pointer`}
+                          onClick={() => {
+                            void handleMarkRead(n.id);
+                            setBell(false);
+                            if (
+                              n.type === "RentalRequestAccepted" ||
+                              n.type === "ContractSigned" ||
+                              n.title?.toLowerCase().includes("hợp đồng")
+                            ) {
+                              navigate("/my-room?action=sign#contract-signing-section");
+                            } else if (n.type?.includes("Invoice") || n.type?.includes("Payment")) {
+                              navigate("/my-room");
+                            } else if (n.type?.includes("Appointment")) {
+                              navigate("/requests");
+                            }
+                          }}
+                        >
                           <span className="dot" />
                           <span className="flex-1">
                             <b className="block text-[13px]">{n.title}</b>
@@ -141,6 +173,8 @@ export default function CustomerLayout() {
           ))}
         </nav>
       )}
+
+      <ChatDock />
     </div>
   );
 }

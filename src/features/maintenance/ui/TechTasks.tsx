@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Field, Icon, PageHead, Pill, Tabs, toVNTime, useToast, type Tone } from "@/shared/ui";
+import type { Id } from "@/shared/lib/id";
+import { Field, Icon, PageHead, Pill, Tabs, toVNTime, useToast, formatMoneyInput, parseMoneyInput, type Tone } from "@/shared/ui";
 import { assetApi, type MaintenanceRequest } from "@/api/assetMaintenance";
 import { fetchPagedHistory } from "@/api/pagedHistory";
+import { useBuildingLookup, useRoomLookup } from "@/shared/lib/refLabels";
 
 const prioTone: Record<string, Tone> = {
   URGENT: "coral",
@@ -45,6 +47,15 @@ export default function TechTasks() {
 
   const [toast, show] = useToast();
 
+  const roomOf = useRoomLookup([
+    ...tasks.map((t) => t.roomId),
+    selectedTask?.roomId,
+  ]);
+  const buildingOf = useBuildingLookup([
+    ...tasks.map((t) => t.buildingId),
+    selectedTask?.buildingId,
+  ]);
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -75,7 +86,7 @@ export default function TechTasks() {
     void loadTasks();
   }, [loadTasks]);
 
-  const handleStart = async (id: number) => {
+  const handleStart = async (id: Id) => {
     setProcessing(true);
     try {
       await assetApi.start(id);
@@ -88,7 +99,7 @@ export default function TechTasks() {
     }
   };
 
-  const handleComplete = async (id: number) => {
+  const handleComplete = async (id: Id) => {
     if (!actionTaken.trim()) {
       show("Vui lòng ghi rõ biện pháp xử lý đã thực hiện.");
       return;
@@ -97,11 +108,11 @@ export default function TechTasks() {
     try {
       await assetApi.complete(id, {
         actionTaken: actionTaken.trim(),
-        cost: Number(cost) || 0,
+        cost: parseMoneyInput(cost),
       });
       show("Đã hoàn tất nghiệm thu phiếu bảo trì.");
       setActionTaken("");
-      setCost("0");
+      setCost("");
       await loadTasks();
     } catch (e) {
       show(e instanceof Error ? e.message : "Hoàn tất thất bại.");
@@ -167,11 +178,11 @@ export default function TechTasks() {
                     </Pill>
                   </div>
                 </div>
-                <h3>Phiếu xử lý phòng #{t.roomId}</h3>
+                <h3>Phiếu xử lý phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`}</h3>
                 <div className="flex items-center justify-between text-xs text-muted mt-2">
                   <span className="flex items-center gap-1">
                     <Icon name="pin" size={12} />
-                    Tòa #{t.buildingId} · Phòng #{t.roomId}
+                    {buildingOf(t.buildingId) ?? `Tòa #${t.buildingId}`} · Phòng {roomOf(t.roomId)?.code ?? `#${t.roomId}`}
                   </span>
                   <span>{toVNTime(t.createdAt, true)}</span>
                 </div>
@@ -185,7 +196,7 @@ export default function TechTasks() {
                 <div>
                   <h2>Phiếu bảo trì #{selectedTask.id}</h2>
                   <p>
-                    Tòa #{selectedTask.buildingId} · Phòng #{selectedTask.roomId}
+                    {buildingOf(selectedTask.buildingId) ?? `Tòa #${selectedTask.buildingId}`} · Phòng {roomOf(selectedTask.roomId)?.code ?? `#${selectedTask.roomId}`}
                     {selectedTask.applianceId ? ` · Thiết bị #${selectedTask.applianceId}` : ""}
                   </p>
                 </div>
@@ -245,12 +256,16 @@ export default function TechTasks() {
                         placeholder="Ví dụ: Đã vệ sinh dàn lạnh và nạp thêm gas..."
                       />
                     </Field>
-                    <Field label="Chi phí phát sinh (VNĐ)">
+                    <Field
+                      label="Chi phí phát sinh (VNĐ)"
+                      hint={cost ? `${parseMoneyInput(cost).toLocaleString("vi-VN")} ₫` : "Nhập số tiền phát sinh nếu có linh kiện thay thế"}
+                    >
                       <input
-                        type="number"
+                        inputMode="numeric"
                         value={cost}
-                        onChange={(e) => setCost(e.target.value)}
+                        onChange={(e) => setCost(formatMoneyInput(e.target.value))}
                         placeholder="0"
+                        className="input"
                       />
                     </Field>
                     <button

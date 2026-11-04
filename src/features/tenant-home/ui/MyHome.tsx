@@ -1,37 +1,69 @@
-import { motion } from "motion/react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/shared/ui";
 import { HomeExtras } from "./MyHomeExtras";
 
 export default function MyHome() {
+  const [activeTab, setActiveTab] = useState<"billing" | "contracts" | "roommates">("billing");
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (hash === "#contract-signing-section" || urlParams.get("action") === "sign" || urlParams.get("tab") === "contracts") {
+      setActiveTab("contracts");
+    } else if (urlParams.get("tab") === "roommates") {
+      setActiveTab("roommates");
+    }
+  }, []);
+
   return (
     <section className="cx-section !pt-32">
-      <div className="cx-eyebrow">Khu vực khách thuê</div>
-      <h1 className="cx-serif cx-h2">Hóa đơn của bạn, <em>minh bạch</em> và gọn gàng.</h1>
-
-      <div className="cx-home">
-        <motion.article className="cx-bill" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-          <div className="cx-bill-top">
-            <div>
-              <span className="cx-meta !text-white/60">Kỳ thanh toán</span>
-              <div className="mt-3 max-w-[320px] text-sm leading-6 text-white/70">
-                Số tiền, hạn thanh toán và trạng thái thanh toán sẽ hiển thị ở đây khi dịch vụ hóa đơn được kết nối.
-              </div>
-            </div>
-          </div>
-          <div className="cx-btn ghost !cursor-default opacity-60" aria-disabled="true">
-            <Icon name="clock" size={18} /> Dữ liệu hóa đơn chưa được kết nối
-          </div>
-        </motion.article>
-
-        <motion.article className="cx-panel" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}>
-          <h3 className="cx-panel-title">Chi tiết hóa đơn</h3>
-          <div className="alert alert-info">
-            Chưa có kết nối tới dịch vụ hóa đơn, nên chưa thể hiển thị tiền phòng, điện, nước, dịch vụ hay số tiền phải trả.
-          </div>
-        </motion.article>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <div className="cx-eyebrow">Khu vực cư dân · Quản lý phòng & Dịch vụ</div>
+          <h1 className="cx-serif cx-h2">
+            Căn phòng của bạn, <em>minh bạch</em> & trọn vẹn.
+          </h1>
+          <p className="mt-2 text-sm text-muted max-w-xl">
+            Tách biệt rõ ràng thu chi hóa đơn, hợp đồng pháp lý và quản lý bạn ở ghép cùng phòng.
+          </p>
+        </div>
       </div>
 
-      <HomeExtras />
+      {/* Thanh Tabs Điều Hướng Cấp Cao Nhất Tách Biệt Hóa Đơn - Hợp Đồng - Ở Ghép */}
+      <div className="mt-8 flex flex-wrap gap-3 border-b border-line pb-4">
+        <button
+          type="button"
+          className={`cx-chip !py-2.5 !px-5 text-sm flex items-center gap-2 font-bold ${
+            activeTab === "billing" ? "on !bg-teal-700 !text-white !border-teal-700 shadow-sm" : ""
+          }`}
+          onClick={() => setActiveTab("billing")}
+        >
+          <Icon name="check" size={16} /> 1. Hóa đơn & Thu chi phòng
+        </button>
+
+        <button
+          type="button"
+          className={`cx-chip !py-2.5 !px-5 text-sm flex items-center gap-2 font-bold ${
+            activeTab === "contracts" ? "on !bg-teal-700 !text-white !border-teal-700 shadow-sm" : ""
+          }`}
+          onClick={() => setActiveTab("contracts")}
+        >
+          <Icon name="search" size={16} /> 2. Hợp đồng & Thành viên
+        </button>
+
+        <button
+          type="button"
+          className={`cx-chip !py-2.5 !px-5 text-sm flex items-center gap-2 font-bold ${
+            activeTab === "roommates" ? "on !bg-teal-700 !text-white !border-teal-700 shadow-sm" : ""
+          }`}
+          onClick={() => setActiveTab("roommates")}
+        >
+          <Icon name="users" size={16} /> 3. Ở ghép phòng tôi
+        </button>
+      </div>
+
+      {/* Nội Dung Từng Tab Toàn Chiều Rộng, Không Bị Chèn Ép Cột Hẹp */}
+      <HomeExtras activeTab={activeTab} onTabChange={setActiveTab} />
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { useLocation } from "react-router";
+import type { Id } from "@/shared/lib/id";
+import { motion } from "motion/react";
+import { useLocation, useNavigate } from "react-router";
 import { toVNTime } from "@/shared/ui";
 import { useAuth } from "@/features/auth";
 import { useCxToast } from "@/features/notifications";
@@ -20,6 +21,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
 export default function Profile() {
   const { user, updateFullName } = useAuth();
   const loc = useLocation();
+  const navigate = useNavigate();
   const [toast, show] = useCxToast();
 
   const [form, setForm] = useState({
@@ -111,7 +113,7 @@ export default function Profile() {
     }
   };
 
-  const handleMarkRead = async (id: number) => {
+  const handleMarkRead = async (id: Id) => {
     try {
       await markNotificationRead(id);
       setNotifications((prev) =>
@@ -261,30 +263,35 @@ export default function Profile() {
               </button>
             </div>
           ) : (
-            <AnimatePresence initial={false} mode="popLayout">
-              {shown.map((n) => (
-                <motion.div
-                  key={n.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className={`cx-noti ${n.isRead ? "read" : ""}`}
-                  onClick={() => {
-                    if (!n.isRead) void handleMarkRead(n.id);
-                  }}
-                >
-                  <span className="dot" />
-                  <span className="flex-1">
-                    <b className="block">{n.title}</b>
-                    <span className="block text-[13px] text-[#56636a]">{n.content}</span>
-                    <small className="cx-meta">
-                      {notificationKind(n.type)} · {toVNTime(n.createdAt, true)}
-                    </small>
-                  </span>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+            shown.map((n) => (
+              <div
+                key={n.id}
+                className={`cx-noti ${n.isRead ? "read" : ""} cursor-pointer`}
+                onClick={() => {
+                  if (!n.isRead) void handleMarkRead(n.id);
+                  if (
+                    n.type === "RentalRequestAccepted" ||
+                    n.type === "ContractSigned" ||
+                    n.title?.toLowerCase().includes("hợp đồng")
+                  ) {
+                    navigate("/my-room?action=sign#contract-signing-section");
+                  } else if (n.type?.includes("Invoice") || n.type?.includes("Payment")) {
+                    navigate("/my-room");
+                  } else if (n.type?.includes("Appointment")) {
+                    navigate("/requests");
+                  }
+                }}
+              >
+                <span className="dot" />
+                <span className="flex-1">
+                  <b className="block">{n.title}</b>
+                  <span className="block text-[13px] text-[#56636a]">{n.content}</span>
+                  <small className="cx-meta">
+                    {notificationKind(n.type)} · {toVNTime(n.createdAt, true)}
+                  </small>
+                </span>
+              </div>
+            ))
           )}
           {!loadingNotis && shown.length === 0 && !notisErr && (
             <p className="text-sm text-[#6b777d]">Không có thông báo nào.</p>

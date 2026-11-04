@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { idStr, type Id } from "@/shared/lib/id";
 import { AnimatePresence, motion } from "motion/react";
 import { Icon, toVNTime } from "@/shared/ui";
 import { assetApi, type MaintenanceReport, type MaintenanceRequest } from "@/api/assetMaintenance";
 import { fetchPagedHistory, type PagedHistory } from "@/api/pagedHistory";
 import { contractsApi, type Contract } from "@/features/contracts/api/contractsApi";
+import { useRoomLookup } from "@/shared/lib/refLabels";
 
-const cats = [
-  { k: "Điện", e: "⚡" },
-  { k: "Nước", e: "💧" },
-  { k: "Máy lạnh", e: "❄️" },
-  { k: "Internet", e: "📶" },
-  { k: "Khóa cửa", e: "🔑" },
-  { k: "Khác", e: "✦" },
-];
+const cats = ["Điện", "Nước", "Máy lạnh", "Internet", "Khóa cửa", "Khác"];
 const steps = ["Đã gửi", "Đã tiếp nhận", "Đang xử lý", "Hoàn tất"];
 const MAX = 5;
 const HISTORY_PAGE_SIZE = 100;
@@ -57,6 +52,11 @@ export default function Repairs() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState("");
+
+  const roomOf = useRoomLookup([
+    ...reports.map((r) => r.roomId),
+    activeContract?.roomId,
+  ]);
 
   const loadReports = useCallback(async () => {
     setLoadingReports(true);
@@ -112,10 +112,10 @@ export default function Repairs() {
   }, []);
 
   const requestByReportId = useMemo(() => {
-    const map = new Map<number, MaintenanceRequest>();
+    const map = new Map<string, MaintenanceRequest>();
     for (const req of requests) {
       if (req.reportId != null) {
-        map.set(req.reportId, req);
+        map.set(idStr(req.reportId), req);
       }
     }
     return map;
@@ -202,14 +202,14 @@ export default function Repairs() {
           <div className="cx-cats">
             {cats.map((c) => (
               <motion.button
-                key={c.k}
+                key={c}
                 type="button"
                 whileTap={{ scale: 0.94 }}
-                className={cat === c.k ? "on" : ""}
-                onClick={() => setCat(c.k)}
+                className={cat === c ? "on" : ""}
+                onClick={() => setCat(c)}
               >
-                <span className="text-xl">{c.e}</span>
-                {c.k}
+                <Icon name="tools" size={18} />
+                {c}
               </motion.button>
             ))}
           </div>
@@ -341,7 +341,7 @@ export default function Repairs() {
               )}
             <AnimatePresence initial={false}>
               {reports.map((r) => {
-                const req = requestByReportId.get(r.id);
+                const req = requestByReportId.get(idStr(r.id));
                 let step = 0;
                 let statusLabel = "Chờ duyệt";
                 let statusClass = "info";
@@ -380,7 +380,7 @@ export default function Repairs() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="cx-meta">
-                        Báo hỏng #{r.id} · Phòng #{r.roomId}
+                        Báo hỏng #{r.id} · Phòng {roomOf(r.roomId)?.code ?? `#${r.roomId}`}
                       </span>
                       <span className={`cx-status ${statusClass}`}>{statusLabel}</span>
                     </div>
@@ -416,7 +416,7 @@ export default function Repairs() {
                                 Hẹn kiểm tra: <b>{toVNTime(req.scheduledAt, true)}</b>
                               </span>
                             )}
-                            {req.staffId && <span>Kỹ thuật viên: #{req.staffId}</span>}
+                            {req.staffId && <span>Kỹ thuật viên: đã phân công</span>}
                           </div>
                         )}
                       </>

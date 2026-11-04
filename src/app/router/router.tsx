@@ -22,11 +22,11 @@ const Finance = lazy(() => import("@/features/finance/ui/Finance"));
 const Maintenance = lazy(() => import("@/features/maintenance/ui/Maintenance"));
 const Tenants = lazy(() => import("@/features/people/ui/Tenants"));
 const Staff = lazy(() => import("@/features/people/ui/Staff"));
-const Reports = lazy(() => import("@/features/reporting/ui/Reports"));
-const Assets = lazy(() => import("@/features/properties/ui/Assets"));
 const MeterReading = lazy(() => import("@/features/finance/ui/MeterReading"));
 const TechTasks = lazy(() => import("@/features/maintenance/ui/TechTasks"));
 const SalePipeline = lazy(() => import("@/features/sales/ui/SalePipeline"));
+const NotificationsPage = lazy(() => import("@/features/notifications/ui/NotificationsPage"));
+const ChatWorkspace = lazy(() => import("@/features/chat/ui/ChatWorkspace"));
 const Dashboard = lazy(() => import("@/features/dashboard/ui/Dashboard"));
 const ManagerHome = lazy(() => import("@/features/dashboard/ui/ManagerHome"));
 const Login = lazy(() => import("@/features/auth/ui/AuthPages").then((module) => ({ default: module.Login })));
@@ -45,21 +45,23 @@ function AdminIndex() {
   if (user.role === "QUAN_LY") return <ManagerHome onNavigate={onNavigate} />;
   if (user.role === "KY_THUAT") return <TechTasks />;
   if (user.role === "SALE") return <SalePipeline />;
-  return <Dashboard onNavigate={onNavigate} />;
+  return <Dashboard />;
 }
 
 const destinations: Record<string, string> = {
   "Tổng quan": "overview", "Tòa nhà": "buildings", "Phòng & Tin đăng": "rooms", "Hợp đồng": "contracts",
-  "Tài chính": "finance", "Bảo trì": "maintenance", "Tài sản": "assets", "Khách thuê & Ở ghép": "tenants",
-  "Nhân sự": "staff", "Báo cáo": "reports", "Chốt chỉ số": "meter-readings", "Hóa đơn": "invoices",
+  "Bảo trì": "maintenance", "Khách thuê & Ở ghép": "tenants",
+  "Nhân sự": "staff", "Chốt chỉ số": "meter-readings", "Hóa đơn": "invoices",
   "Việc của tôi": "my-tasks", "Bảng bảo trì": "maintenance-board", "Khách tiềm năng": "leads",
+  "Yêu cầu": "leads",
+  "Thông báo": "notifications", "Thêm tòa nhà": "buildings/new", "Tin nhắn": "messages",
 };
 
 function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const onNavigate = (label: string) => navigate(`/admin/${destinations[label] ?? "overview"}`);
-  return user?.role === "QUAN_LY" ? <ManagerHome onNavigate={onNavigate} /> : <Dashboard onNavigate={onNavigate} />;
+  return user?.role === "QUAN_LY" ? <ManagerHome onNavigate={onNavigate} /> : <Dashboard />;
 }
 
 export const router = createBrowserRouter([
@@ -74,13 +76,16 @@ export const router = createBrowserRouter([
       { path: "roommates", element: <RequireRole roles={["CUSTOMER"]}><Roommates /></RequireRole> },
       { path: "profile", element: <RequireRole roles={["CUSTOMER"]}><Profile /></RequireRole> },
       { path: "requests", element: <RequireRole roles={["CUSTOMER"]}><Requests /></RequireRole> },
+      { path: "messages", element: <RequireRole roles={["CUSTOMER"]}><ChatWorkspace mode="customer" /></RequireRole> },
       { path: "dang-nhap", element: <Navigate to="/login" replace /> },
       { path: "dang-ky", element: <Navigate to="/register" replace /> },
       { path: "phong-cua-toi", element: <Navigate to="/my-room" replace /> },
+      { path: "my-home", element: <Navigate to="/my-room" replace /> },
       { path: "sua-chua", element: <Navigate to="/repairs" replace /> },
       { path: "o-ghep", element: <Navigate to="/roommates" replace /> },
       { path: "ho-so", element: <Navigate to="/profile" replace /> },
       { path: "lich-hen", element: <Navigate to="/requests" replace /> },
+      { path: "tin-nhan", element: <Navigate to="/messages" replace /> },
       { path: "*", Component: NotFound },
     ],
   },
@@ -92,23 +97,24 @@ export const router = createBrowserRouter([
       { path: "buildings", element: <RequireAdminSection section="buildings"><Buildings /></RequireAdminSection> },
       { path: "buildings/new", element: <RequireAdminSection section="buildings"><BuildingFormPage /></RequireAdminSection> },
       { path: "buildings/:buildingId/edit", element: <RequireAdminSection section="buildings"><BuildingFormPage /></RequireAdminSection> },
-      { path: "buildings/:buildingId", element: <RequireAdminSection section="buildings"><BuildingRoomsPage /></RequireAdminSection> },
-      { path: "buildings/:buildingId/rooms", element: <RequireAdminSection section="buildings"><BuildingRoomsPage /></RequireAdminSection> },
-      { path: "buildings/:buildingId/rooms/:roomId", element: <RequireAdminSection section="buildings"><RoomDetailPage /></RequireAdminSection> },
+      { path: "buildings/:buildingId", element: <RequireAdminSection section="room-details"><BuildingRoomsPage /></RequireAdminSection> },
+      { path: "buildings/:buildingId/rooms", element: <RequireAdminSection section="room-details"><BuildingRoomsPage /></RequireAdminSection> },
+      { path: "buildings/:buildingId/rooms/:roomId", element: <RequireAdminSection section="room-details"><RoomDetailPage /></RequireAdminSection> },
       { path: "rooms", element: <RequireAdminSection section="rooms"><Rooms /></RequireAdminSection> },
       { path: "contracts", element: <RequireAdminSection section="contracts"><Contracts /></RequireAdminSection> },
       { path: "contracts/new-draft", element: <RequireAdminSection section="contracts"><CreateDraftContractPage /></RequireAdminSection> },
-      { path: "finance", element: <RequireAdminSection section="finance"><Finance /></RequireAdminSection> },
+      { path: "finance", element: <Navigate to="/admin/invoices" replace /> },
       { path: "maintenance", element: <RequireAdminSection section="maintenance"><Maintenance /></RequireAdminSection> },
-      { path: "assets", element: <RequireAdminSection section="assets"><Assets /></RequireAdminSection> },
       { path: "tenants", element: <RequireAdminSection section="tenants"><Tenants /></RequireAdminSection> },
       { path: "staff", element: <RequireAdminSection section="staff"><Staff /></RequireAdminSection> },
-      { path: "reports", element: <RequireAdminSection section="reports"><Reports /></RequireAdminSection> },
+      { path: "reports", element: <Navigate to="/admin/overview" replace /> },
       { path: "meter-readings", element: <RequireAdminSection section="meter-readings"><MeterReading /></RequireAdminSection> },
       { path: "invoices", element: <RequireAdminSection section="invoices"><Finance /></RequireAdminSection> },
       { path: "my-tasks", element: <RequireAdminSection section="my-tasks"><TechTasks /></RequireAdminSection> },
       { path: "maintenance-board", element: <RequireAdminSection section="maintenance-board"><Maintenance /></RequireAdminSection> },
       { path: "leads", element: <RequireAdminSection section="leads"><SalePipeline /></RequireAdminSection> },
+      { path: "notifications", element: <RequireAdminSection section="notifications"><NotificationsPage /></RequireAdminSection> },
+      { path: "messages", element: <RequireAdminSection section="messages"><ChatWorkspace mode="staff" /></RequireAdminSection> },
       { path: "*", element: <Navigate to="/admin" replace /> },
     ],
   },
