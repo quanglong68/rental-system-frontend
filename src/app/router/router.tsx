@@ -29,6 +29,7 @@ const NotificationsPage = lazy(() => import("@/features/notifications/ui/Notific
 const ChatWorkspace = lazy(() => import("@/features/chat/ui/ChatWorkspace"));
 const Dashboard = lazy(() => import("@/features/dashboard/ui/Dashboard"));
 const ManagerHome = lazy(() => import("@/features/dashboard/ui/ManagerHome"));
+const VnpayReturnPage = lazy(() => import("@/features/tenant-home/ui/VnpayReturnPage"));
 const Login = lazy(() => import("@/features/auth/ui/AuthPages").then((module) => ({ default: module.Login })));
 const Register = lazy(() => import("@/features/auth/ui/AuthPages").then((module) => ({ default: module.Register })));
 
@@ -77,6 +78,8 @@ export const router = createBrowserRouter([
       { path: "profile", element: <RequireRole roles={["CUSTOMER"]}><Profile /></RequireRole> },
       { path: "requests", element: <RequireRole roles={["CUSTOMER"]}><Requests /></RequireRole> },
       { path: "messages", element: <RequireRole roles={["CUSTOMER"]}><ChatWorkspace mode="customer" /></RequireRole> },
+      { path: "payment/vnpay-return", element: <VnpayReturnPage /> },
+      { path: "vnpay-return", element: <VnpayReturnPage /> },
       { path: "dang-nhap", element: <Navigate to="/login" replace /> },
       { path: "dang-ky", element: <Navigate to="/register" replace /> },
       { path: "phong-cua-toi", element: <Navigate to="/my-room" replace /> },

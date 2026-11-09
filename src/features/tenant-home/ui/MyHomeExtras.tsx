@@ -436,7 +436,7 @@ export function HomeExtras({
 
   const [roomCapacity, setRoomCapacity] = useState<number | null>(null);
   const [roomCapacityError, setRoomCapacityError] = useState<string | null>(null);
-  const [simulating, setSimulating] = useState(false);
+  const [payingVnpay, setPayingVnpay] = useState(false);
 
   // Roommate host state
   const [myRoommatePosts, setMyRoommatePosts] = useState<RoommatePost[]>([]);
@@ -943,38 +943,15 @@ export function HomeExtras({
                           </span>
                         </div>
 
-                        {/* Nút thanh toán VietQR & Giả lập thanh toán dành riêng cho người dùng hiện tại */}
+                        {/* Nút thanh toán VNPay Sandbox dành riêng cho người dùng hiện tại */}
                         {isMe && !isPaid && myPendingInvoice && (
                           <div className="mt-3 pt-2 border-t border-dashed border-teal-200 flex flex-col gap-2">
                             <button
                               type="button"
-                              className="cx-btn !h-9 w-full text-xs bg-teal-700 hover:bg-teal-800 flex items-center justify-center gap-1.5"
+                              className="cx-btn !h-9 w-full text-xs bg-teal-700 hover:bg-teal-800 flex items-center justify-center gap-1.5 font-bold shadow-sm"
                               onClick={() => setPayingInvoice(myPendingInvoice)}
                             >
-                              <Icon name="check" size={14} /> Thanh toán VietQR phần của bạn →
-                            </button>
-                            <button
-                              type="button"
-                              disabled={simulating}
-                              className="cx-btn secondary !h-8 w-full text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 flex items-center justify-center gap-1 font-semibold"
-                              onClick={async () => {
-                                try {
-                                  setSimulating(true);
-                                  await billingApi.simulatePayment({
-                                    invoiceId: myPendingInvoice.id,
-                                    amountPaid: owed > 0 ? owed : myPendingInvoice.totalAmount,
-                                    note: "Khách hàng giả lập thanh toán VietQR thành công",
-                                  });
-                                  show("Đã giả lập thanh toán thành công! Hóa đơn của bạn đã chuyển sang ĐÃ THU.");
-                                  await Promise.all([loadInvoices(), loadRoomInvoices()]);
-                                } catch (e) {
-                                  show("Không thể ghi nhận thanh toán: " + errorText(e));
-                                } finally {
-                                  setSimulating(false);
-                                }
-                              }}
-                            >
-                              Giả lập thanh toán nhanh ({fmtMoney(owed)})
+                              <Icon name="wallet" size={14} /> Thanh toán VNPay Sandbox ({fmtMoney(owed)}) →
                             </button>
                           </div>
                         )}
@@ -1006,7 +983,7 @@ export function HomeExtras({
                     className="cx-btn !h-9 text-xs"
                     onClick={() => setPayingInvoice(myPendingInvoice)}
                   >
-                    Thanh toán VietQR →
+                    Thanh toán VNPay →
                   </button>
                 )}
               </div>
@@ -1078,7 +1055,7 @@ export function HomeExtras({
                     className="cx-btn !h-9 text-xs"
                     onClick={() => setPayingInvoice(myPendingInvoice)}
                   >
-                    Thanh toán VietQR →
+                    Thanh toán VNPay →
                   </button>
                 )}
               </div>
@@ -1135,10 +1112,10 @@ export function HomeExtras({
                       {inv.status !== "PAID" && (
                         <button
                           type="button"
-                          className="cx-btn ghost !h-8 !px-3 text-xs text-teal-700"
+                          className="cx-btn ghost !h-8 !px-3 text-xs text-teal-700 font-semibold"
                           onClick={() => setPayingInvoice(inv)}
                         >
-                          Quét VietQR
+                          Thanh toán VNPay
                         </button>
                       )}
                     </div>
@@ -1596,97 +1573,117 @@ export function HomeExtras({
         </motion.div>
       )}
 
-      {/* POPUP VIETQR THANH TOÁN TIỀN PHÒNG / TIỀN HÓA ĐƠN SEPAY */}
+      {/* POPUP THANH TOÁN TIỀN PHÒNG / TIỀN HÓA ĐƠN QUA VNPAY SANDBOX */}
       {payingInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
-            <h3 className="m-0 text-center text-lg font-bold text-slate-900">
-              Quét mã VietQR chuyển khoản
-            </h3>
-            <p className="mt-1 text-center text-xs text-slate-500 m-0">
-              Hóa đơn tháng {payingInvoice.month}/{payingInvoice.year} · Phòng {roomOf(payingInvoice.roomId)?.code ?? `#${payingInvoice.roomId}`}
-            </p>
-            <div className="mt-4 flex justify-center">
-              <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm">
-                <img
-                  src={`https://qr.sepay.vn/img?acc=0348888999&bank=MBBank&amount=${payingInvoice.totalAmount - (payingInvoice.paidAmount || 0)}&des=TIENTRO%20T${payingInvoice.month}%20HD${payingInvoice.contractId}`}
-                  alt="VietQR Chuyển Khoản"
-                  className="h-56 w-56 object-contain rounded-xl"
-                />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center shadow-inner">
+                  <Icon name="wallet" size={18} />
+                </div>
+                <div>
+                  <h3 className="m-0 text-base font-bold text-slate-900">
+                    Thanh toán VNPay Sandbox
+                  </h3>
+                  <p className="text-xs text-slate-500 m-0">
+                    Hóa đơn tháng {payingInvoice.month}/{payingInvoice.year} · Phòng {roomOf(payingInvoice.roomId)?.code ?? `#${payingInvoice.roomId}`}
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="mt-4 space-y-1.5 rounded-xl bg-slate-50 p-3 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Ngân hàng:</span>
-                <b>MBBank (Quân Đội)</b>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Số tài khoản:</span>
-                <code className="font-mono font-bold text-teal-700">0348888999</code>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Chủ tài khoản:</span>
-                <b>BAN QUAN LY TOA NHA</b>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Số tiền cần nộp:</span>
-                <b className="text-teal-700 font-extrabold">{fmtMoney(payingInvoice.totalAmount - (payingInvoice.paidAmount || 0))}</b>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500">Nội dung chuyển:</span>
-                <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200 text-teal-800 font-bold">
-                  TIENTRO T{payingInvoice.month} HD{payingInvoice.contractId}
-                </code>
-              </div>
-              <div className="flex justify-between border-t border-slate-200/60 pt-1.5 text-slate-500">
-                <span>Hạn nộp tiền:</span>
-                <b className="text-rose-600 font-semibold">{fmtDateField(payingInvoice.dueDate)}</b>
-              </div>
-            </div>
-            <div className="mt-5 flex flex-col gap-2">
               <button
                 type="button"
-                disabled={simulating}
-                className="cx-btn !h-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-700/20"
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer border-0 bg-transparent"
+                onClick={() => setPayingInvoice(null)}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+
+            <div className="my-5 space-y-3">
+              <div className="rounded-2xl bg-teal-50/70 border border-teal-200/80 p-4 text-center">
+                <span className="text-xs font-medium text-teal-800 block mb-0.5">Số tiền cần thanh toán</span>
+                <span className="text-2xl font-black text-teal-950 tracking-tight">
+                  {fmtMoney(payingInvoice.totalAmount - (payingInvoice.paidAmount || 0))}
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Mã hóa đơn:</span>
+                  <span className="font-mono font-bold text-slate-800">#{payingInvoice.id}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Kỳ thanh toán:</span>
+                  <b>Tháng {payingInvoice.month}/{payingInvoice.year}</b>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Hạn nộp tiền:</span>
+                  <b className="text-rose-600 font-semibold">{fmtDateField(payingInvoice.dueDate)}</b>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200/60">
+                  <span className="text-slate-500">Cổng thanh toán:</span>
+                  <div className="flex items-center gap-1.5 font-bold text-teal-800">
+                    <span className="w-2 h-2 rounded-full bg-teal-500" /> VNPay Sandbox
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-amber-50 border border-amber-200/70 p-3 text-[11px] text-amber-900 leading-relaxed flex items-start gap-2">
+                <Icon name="alert" size={16} className="shrink-0 mt-0.5 text-amber-600" />
+                <div>
+                  <b className="block text-amber-950 font-semibold mb-0.5">Môi trường thử nghiệm Sandbox</b>
+                  Bạn sẽ được chuyển hướng tới Cổng thanh toán VNPay Sandbox. Bạn có thể sử dụng thông tin thẻ ATM ngân hàng test (NCB, v.v.) được VNPay cấp sẵn để hoàn tất giao dịch.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={payingVnpay}
+                className="cx-btn !h-11 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-teal-800/20 disabled:opacity-60 cursor-pointer"
                 onClick={async () => {
                   try {
-                    setSimulating(true);
-                    await billingApi.simulatePayment({
+                    setPayingVnpay(true);
+                    const owed = payingInvoice.totalAmount - (payingInvoice.paidAmount || 0);
+                    const returnUrl = (import.meta.env.VITE_VNPAY_RETURN_URL as string | undefined) || `${window.location.origin}/payment/vnpay-return`;
+                    const res = await billingApi.createVnpayUrl({
                       invoiceId: payingInvoice.id,
-                      amountPaid: payingInvoice.totalAmount - (payingInvoice.paidAmount || 0),
-                      note: "Khách hàng giả lập thanh toán VietQR thành công",
+                      amount: owed > 0 ? owed : payingInvoice.totalAmount,
+                      returnUrl,
                     });
-                    setPayingInvoice(null);
-                    show("Thanh toán thành công! Trạng thái hóa đơn đã được cập nhật ĐÃ THU.");
-                    await Promise.all([loadInvoices(), loadRoomInvoices()]);
+                    if (res?.paymentUrl) {
+                      window.location.href = res.paymentUrl;
+                    } else {
+                      show("Không thể khởi tạo đường dẫn thanh toán VNPay");
+                    }
                   } catch (e) {
-                    show("Không thể ghi nhận thanh toán: " + errorText(e));
+                    show("Không thể khởi tạo thanh toán VNPay: " + errorText(e));
                   } finally {
-                    setSimulating(false);
+                    setPayingVnpay(false);
                   }
                 }}
               >
-                <Icon name="check" size={16} /> Giả lập thanh toán thành công (Báo quản lý)
+                {payingVnpay ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Đang kết nối tới VNPay...</span>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="wallet" size={16} /> Chuyển tới cổng thanh toán VNPay Sandbox →
+                  </>
+                )}
               </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="cx-btn !h-9 flex-1 bg-teal-700 hover:bg-teal-800 text-xs"
-                  onClick={() => {
-                    setPayingInvoice(null);
-                    show("Đã ghi nhận yêu cầu đối soát! Ban quản lý sẽ xác nhận khi nhận được tiền.");
-                  }}
-                >
-                  Tôi đã quét mã chuyển khoản
-                </button>
-                <button
-                  type="button"
-                  className="cx-btn ghost !h-9 text-xs"
-                  onClick={() => setPayingInvoice(null)}
-                >
-                  Đóng
-                </button>
-              </div>
+
+              <button
+                type="button"
+                className="cx-btn ghost !h-9 text-xs text-slate-500 hover:text-slate-700"
+                onClick={() => setPayingInvoice(null)}
+              >
+                Đóng
+              </button>
             </div>
           </div>
         </div>

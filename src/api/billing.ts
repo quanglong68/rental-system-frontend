@@ -407,4 +407,16 @@ export const billingApi = {
     apiFetch<Payment>("/api/v1/payments", { method: "POST", body }),
   simulatePayment: (body: CreatePaymentRequest) =>
     apiFetch<Payment>("/api/v1/payments/simulate", { method: "POST", body }),
+
+  /* VNPay Sandbox Integration */
+  createVnpayUrl: (body: { invoiceId: Id; amount?: number; returnUrl?: string }) =>
+    apiFetch<{ paymentUrl: string; txnRef: string; invoiceId: Id; amount: number }>(
+      "/api/v1/payments/vnpay/create-url",
+      { method: "POST", body }
+    ),
+  confirmVnpayPayment: (params: Record<string, string>) =>
+    apiFetch<{ success: boolean; message: string; invoiceId?: Id; amount?: number; txnRef?: string }>(
+      "/api/v1/payments/vnpay/confirm",
+      { method: "POST", body: params }
+    ),
 };
