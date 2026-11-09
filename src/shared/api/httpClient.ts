@@ -57,7 +57,11 @@ async function refreshSession(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Correlation-Id": newCorrelationId() },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Correlation-Id": newCorrelationId(),
+        "ngrok-skip-browser-warning": "true",
+      },
       body: JSON.stringify({ refreshToken }),
       signal: controller.signal,
     });
@@ -104,6 +108,7 @@ export async function apiBlob(path: string, options: ApiOptions = {}): Promise<B
         signal: controller.signal,
         headers: {
           "X-Correlation-Id": cid,
+          "ngrok-skip-browser-warning": "true",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(headers ?? {}),
         },
@@ -166,6 +171,7 @@ export async function apiEventStream(path: string, handlers: EventStreamHandlers
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
         "X-Correlation-Id": cid,
+        "ngrok-skip-browser-warning": "true",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       signal,
@@ -263,6 +269,7 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
         headers: {
           ...(!isFormData ? { "Content-Type": "application/json" } : {}),
           "X-Correlation-Id": cid,
+          "ngrok-skip-browser-warning": "true",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(headers ?? {}),
         },

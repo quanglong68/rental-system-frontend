@@ -88,7 +88,14 @@ export const assetApi = {
             imageUrl: string;
             expiresInSeconds: number
         }>("/api/v1/reports/image-upload-url", {method: "POST", body: {fileName: file.name, contentType: file.type}});
-        const response = await fetch(uploadUrl, {method: "PUT", headers: {"Content-Type": file.type}, body: file});
+        const response = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: {
+                "Content-Type": file.type,
+                "ngrok-skip-browser-warning": "true",
+            },
+            body: file,
+        });
         if (!response.ok) throw new Error("Không tải được ảnh lên MinIO.");
         return imageUrl;
     },
