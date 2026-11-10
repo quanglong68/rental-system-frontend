@@ -350,8 +350,8 @@ export default function RentalRequestDrawer({
   )
 
   return (
-    // Wrapper tạo stacking context cao hơn .cx-sheet (z-index 61) của trang khám phá.
-    <div style={{ position: "relative", zIndex: 70 }}>
+    // Wrapper tạo stacking context cao hơn .cx-sheet (z-index 61) của trang khám phá và chat dock (z-index 110).
+    <div style={{ position: "relative", zIndex: 300 }}>
       <Drawer
         open={open}
         wide

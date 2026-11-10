@@ -1166,6 +1166,16 @@
   gap: 12px;
 }
 
+/* Tự động ẩn bong bóng chat nổi khi đang mở Drawer, Sheet chi tiết hoặc Modal để không che nút hành động ở góc dưới */
+body:has(.drawer-root) .cx-dock,
+body:has(.cx-sheet) .cx-dock,
+body:has([aria-modal="true"]:not([data-chat-dock] *):not([data-chat-dock])) .cx-dock {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
 .cx-dock-bubble {
   position: relative;
   display: grid;

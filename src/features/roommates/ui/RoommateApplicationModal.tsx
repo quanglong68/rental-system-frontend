@@ -91,7 +91,7 @@ export default function RoommateApplicationModal({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
+        className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
         role="dialog"
         aria-modal="true"
       >

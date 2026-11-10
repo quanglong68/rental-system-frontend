@@ -931,7 +931,11 @@ export default function Roommates() {
       {/* MODAL 1: Chi tiết toàn diện phòng & ở ghép (Như lúc khách xem phòng) */}
       <AnimatePresence>
         {detailPost && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+          >
             <motion.div
               className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 md:p-8 shadow-2xl"
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1117,7 +1121,11 @@ export default function Roommates() {
 
       {/* MODAL 2: Đăng tin tìm bạn ở ghép */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
             <h2 className="text-xl font-bold text-text">Đăng tin tìm bạn ở ghép</h2>
             <p className="mt-1 text-xs text-muted">

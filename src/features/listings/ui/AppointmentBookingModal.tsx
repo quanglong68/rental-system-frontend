@@ -83,7 +83,11 @@ export default function AppointmentBookingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"

@@ -1575,7 +1575,11 @@ export function HomeExtras({
 
       {/* POPUP THANH TOÁN TIỀN PHÒNG / TIỀN HÓA ĐƠN QUA VNPAY SANDBOX */}
       {payingInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in">
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
