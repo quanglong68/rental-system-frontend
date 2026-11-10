@@ -1170,9 +1170,9 @@
 body:has(.drawer-root) .cx-dock,
 body:has(.cx-sheet) .cx-dock,
 body:has([aria-modal="true"]:not([data-chat-dock] *):not([data-chat-dock])) .cx-dock {
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
   transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
