@@ -15,7 +15,8 @@ export type ChatContextType =
   | "LISTING"
   | "VIEWING"
   | "BOOKING"
-  | "BUILDING_MANAGER";
+  | "BUILDING_MANAGER"
+  | "STAFF";
 
 export type ConversationSummary = {
   id: Id;
@@ -111,6 +112,7 @@ export const CHAT_CONTEXT_LABELS: Record<ChatContextType, string> = {
   VIEWING: "Lịch xem phòng",
   BOOKING: "Yêu cầu thuê",
   BUILDING_MANAGER: "Quản lý tòa nhà",
+  STAFF: "Nội bộ nhân sự",
 };
 
 export function chatContextLabel(type: string | null | undefined): string {

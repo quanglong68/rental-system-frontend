@@ -50,13 +50,13 @@ const roles: Record<StaffRole, { title: string; nav: NavItem[] }> = {
   KY_THUAT: {
     title: "Kỹ thuật viên", nav: [
       { label: "Việc của tôi", path: "my-tasks", icon: "tools" }, { label: "Bảng bảo trì", path: "maintenance-board", icon: "grid" },
-      { label: "Chốt chỉ số", path: "meter-readings", icon: "wallet" },
+      { label: "Chốt chỉ số", path: "meter-readings", icon: "wallet" }, { label: "Tin nhắn", path: "messages", icon: "chat" }, { label: "Nhân sự", path: "staff", icon: "shield" },
     ]
   },
   SALE: {
     title: "Nhân viên kinh doanh", nav: [
       { label: "Yêu cầu", path: "leads", icon: "calendar" }, { label: "Tin nhắn", path: "messages", icon: "chat" }, { label: "Phòng & Tin đăng", path: "rooms", icon: "door" }, { label: "Hợp đồng", path: "contracts", icon: "contract" },
-      { label: "Bảo trì", path: "maintenance", icon: "tools" }, { label: "Hóa đơn", path: "invoices", icon: "split" }, { label: "Nhân sự", path: "staff", icon: "shield" },
+      { label: "Nhân sự", path: "staff", icon: "shield" },
     ]
   },
 };

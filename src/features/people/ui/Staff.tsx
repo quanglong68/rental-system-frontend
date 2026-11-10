@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { Drawer, Field, Icon, MiniStat, PageHead, Pill, Tabs, Toolbar, useToast, type Tone } from "@/shared/ui";
 import { apiFetch } from "@/shared/api/httpClient";
+import { errorText } from "@/shared/api/errors";
+import type { Id } from "@/shared/lib/id";
+import { openConversation } from "@/features/chat/api/chatApi";
+import { openInChatDock } from "@/features/chat/ui/chatDockBus";
 import {
   getStaff,
   updateStaff,
@@ -78,6 +83,26 @@ export default function Staff() {
   const [formError, setFormError] = useState("");
 
   const [toast, show] = useToast();
+  const navigate = useNavigate();
+  const [startingChatId, setStartingChatId] = useState<Id | null>(null);
+
+  const handleStartChat = async (target: UserProfile) => {
+    try {
+      setStartingChatId(target.id);
+      const conversation = await openConversation({
+        contextType: "STAFF",
+        contextId: target.id,
+        staffId: target.id,
+      });
+      if (!openInChatDock(conversation.id)) {
+        navigate(`/admin/messages?c=${conversation.id}`);
+      }
+    } catch (err) {
+      show(`Không thể mở hội thoại: ${errorText(err)}`);
+    } finally {
+      setStartingChatId(null);
+    }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -377,12 +402,26 @@ export default function Staff() {
                       </td>
                       <td className="text-[13px]">{buildingsText}</td>
                       <td className="text-[13px] font-mono">{s.phone || "—"}</td>
-                      <td>
-                        {isAdmin && (
-                          <button className="text-button" onClick={() => openForm(s)}>
-                            Sửa <Icon name="chevron" size={12} />
-                          </button>
-                        )}
+                      <td className="text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-2">
+                          {String(s.id) !== String(user?.id) && (
+                            <button
+                              type="button"
+                              className="secondary-button !h-8 !px-3 !py-0 text-xs font-semibold inline-flex items-center gap-1.5 text-teal-700 hover:bg-teal-50 border-teal-200"
+                              onClick={() => void handleStartChat(s)}
+                              disabled={startingChatId === s.id}
+                              title={`Nhắn tin với ${s.fullName || "nhân viên này"}`}
+                            >
+                              <Icon name="chat" size={14} />
+                              <span>{startingChatId === s.id ? "Đang mở…" : "Nhắn tin"}</span>
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button className="text-button !h-8" onClick={() => openForm(s)}>
+                              Sửa <Icon name="chevron" size={12} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
