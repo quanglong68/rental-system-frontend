@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { sameId, type Id } from "@/shared/lib/id";
 import { Icon, vnd } from "@/shared/ui";
@@ -15,6 +15,7 @@ import { useAuth } from "@/features/auth";
 import { ApiError } from "@/shared/api/httpClient";
 import { errorText } from "@/shared/api/errors";
 import { useBuildingLookup, useCustomerLookup, useRoomLookup } from "@/shared/lib/refLabels";
+import { editBudgetInput, emptyBudgetInput } from "./budgetInput";
 import ChatStartButton from "@/features/chat/ui/ChatStartButton";
 import RoommateApplicationModal from "./RoommateApplicationModal";
 
@@ -60,9 +61,16 @@ export default function Roommates() {
   const [newRoomId, setNewRoomId] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
-  const [rawBudget, setRawBudget] = useState(0);
-  const [displayBudget, setDisplayBudget] = useState("");
+  const [budgetInput, setBudgetInput] = useState(emptyBudgetInput);
+  const budgetInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useLayoutEffect(() => {
+    const input = budgetInputRef.current;
+    if (input && document.activeElement === input) {
+      input.setSelectionRange(budgetInput.selectionStart, budgetInput.selectionEnd);
+    }
+  }, [budgetInput]);
 
   // Apply Modal State (Đầy đủ hồ sơ định danh như lúc thuê phòng)
   const [applyPost, setApplyPost] = useState<RoommatePost | null>(null);
@@ -233,8 +241,7 @@ export default function Roommates() {
       setNewRoomId(String(availableContract.roomId));
       setNewTitle("");
       setNewDesc("");
-      setRawBudget(0);
-      setDisplayBudget("");
+      setBudgetInput(emptyBudgetInput());
       setShowCreateModal(true);
     } catch (err) {
       showToast(
@@ -246,15 +253,13 @@ export default function Roommates() {
   };
 
   const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digits = e.target.value.replace(/\D/g, "");
-    if (!digits) {
-      setRawBudget(0);
-      setDisplayBudget("");
-      return;
-    }
-    const val = parseInt(digits, 10);
-    setRawBudget(val);
-    setDisplayBudget(val.toLocaleString("vi-VN"));
+    const input = e.currentTarget;
+    setBudgetInput(editBudgetInput(budgetInput, {
+      value: input.value,
+      selectionStart: input.selectionStart ?? input.value.length,
+      selectionEnd: input.selectionEnd ?? input.value.length,
+      inputType: (e.nativeEvent as InputEvent).inputType,
+    }));
   };
 
   const handleCreatePost = async () => {
@@ -262,7 +267,7 @@ export default function Roommates() {
       showToast("Vui lòng chọn phòng và điền tiêu đề bài đăng");
       return;
     }
-    if (rawBudget <= 0) {
+    if (!budgetInput.raw || budgetInput.raw === "0") {
       showToast("Vui lòng nhập chi phí chia sẻ dự kiến hợp lệ");
       return;
     }
@@ -286,15 +291,14 @@ export default function Roommates() {
         roomId: newRoomId.trim(),
         title: newTitle.trim(),
         description: newDesc.trim(),
-        budgetShare: rawBudget,
+        budgetShare: Number(budgetInput.raw),
       });
       showToast("Đã tạo bài đăng tìm bạn ở ghép thành công!");
       setShowCreateModal(false);
       setNewRoomId("");
       setNewTitle("");
       setNewDesc("");
-      setRawBudget(0);
-      setDisplayBudget("");
+      setBudgetInput(emptyBudgetInput());
       await loadData();
     } catch (err) {
       showToast(`Không thể tạo bài đăng: ${errText(err)}`);
@@ -1166,7 +1170,9 @@ export default function Roommates() {
                 <div className="relative mt-1">
                   <input
                     type="text"
-                    value={displayBudget}
+                    inputMode="numeric"
+                    ref={budgetInputRef}
+                    value={budgetInput.display}
                     onChange={handleBudgetChange}
                     placeholder="Ví dụ: 2.500.000"
                     className="w-full rounded-lg border border-line p-2.5 pr-14 text-sm font-semibold"
