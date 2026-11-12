@@ -1,5 +1,4 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 
 export type Tone = "teal" | "amber" | "coral" | "slate" | "sky" | "violet";
@@ -53,7 +52,7 @@ export function Toolbar({ placeholder, value, onChange, children }: { placeholde
 /** Ngăn kéo bên phải dùng cho chi tiết & biểu mẫu */
 export function Drawer({ open, title, eyebrow, onClose, children, footer, wide }: { open: boolean; title: string; eyebrow?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
   if (!open) return null;
-  return createPortal(
+  return (
     <div className="drawer-root" role="dialog" aria-modal="true">
       <button className="drawer-scrim" onClick={onClose} aria-label="Đóng"></button>
       <aside className={`drawer ${wide ? "drawer-wide" : ""}`}>
@@ -64,8 +63,7 @@ export function Drawer({ open, title, eyebrow, onClose, children, footer, wide }
         <div className="drawer-body">{children}</div>
         {footer && <footer className="drawer-foot">{footer}</footer>}
       </aside>
-    </div>,
-    document.body
+    </div>
   );
 }
 

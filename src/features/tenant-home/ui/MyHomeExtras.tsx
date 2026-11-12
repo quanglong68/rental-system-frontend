@@ -69,7 +69,7 @@ const signatureClass: Record<SignatureStatus, string> = {
   DECLINED: "bad",
   EXPIRED: "bad",
 };
-const paymentMethodLabel: Record<string, string> = { CASH: "Tiền mặt", BANK_TRANSFER: "Chuyển khoản" };
+const paymentMethodLabel: Record<string, string> = { CASH: "Tiền mặt", BANK_TRANSFER: "Chuyển khoản", VNPAY: "VNPay" };
 const waterUnitLabel: Record<string, string> = { M3: "theo m³", PERSON: "theo người" };
 
 /** YYYY-MM-DD -> DD/MM/YYYY */
@@ -106,7 +106,8 @@ export function CustomerSignatureCard({
   const [file, setFile] = useState<File | null>(null);
   const [accepted, setAccepted] = useState(false);
   const [depositConfirmed, setDepositConfirmed] = useState(false);
-  const [showDepositQr, setShowDepositQr] = useState(false);
+  const [showDepositVnpayModal, setShowDepositVnpayModal] = useState(false);
+  const [payingDepositVnpay, setPayingDepositVnpay] = useState(false);
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
@@ -141,8 +142,8 @@ export function CustomerSignatureCard({
   };
 
   const sign = async () => {
-    if (contract.depositAmount && contract.depositAmount > 0 && !depositConfirmed) {
-      return showErrorDialog("Vui lòng thanh toán tiền cọc qua VietQR và tích xác nhận đã chuyển tiền trước khi ký.");
+    if (contract.depositAmount && contract.depositAmount > 0 && !contract.depositPaid && !depositConfirmed) {
+      return showErrorDialog("Vui lòng thanh toán tiền cọc qua VNPay hoặc xác nhận đã chuyển tiền trước khi ký.");
     }
     if (!password.trim()) return showErrorDialog("Vui lòng nhập mật khẩu đăng nhập của bạn để xác nhận ký điện tử.");
     if (!file) return showErrorDialog("Vui lòng vẽ chữ ký bằng chuột hoặc chọn ảnh chữ ký.");
@@ -156,6 +157,7 @@ export function CustomerSignatureCard({
         password: password.trim(),
         signatureImageKey: key,
         acceptedTerms: accepted,
+        depositConfirmed: depositConfirmed || undefined,
       });
       toast("Đã ký hợp đồng điện tử thành công!");
       setPassword("");
@@ -253,8 +255,32 @@ export function CustomerSignatureCard({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[#6b777d]">Bên cho thuê (Chủ nhà):</span>
-          <span>{lessorSignature ? `Đã ký (${fmtDateField(lessorSignature.signedAt)})` : "Chờ bạn ký trước"}</span>
+          <span>
+            {lessorSignature
+              ? `Đã ký (${fmtDateField(lessorSignature.signedAt)})`
+              : contract.signatureStatus === "AWAITING_LESSOR"
+                ? "Đang chờ bên cho thuê ký"
+                : "Chờ bạn ký trước"}
+          </span>
         </div>
+        {(contract.depositAmount ?? 0) > 0 && (
+          <div className="flex items-center justify-between pt-1 border-t border-line/60">
+            <span className="text-[#6b777d]">Tiền đặt cọc ({vnd(contract.depositAmount ?? 0)}):</span>
+            {contract.depositPaid ? (
+              contract.depositPaymentMethod === "VNPAY" ? (
+                <span className="font-semibold text-emerald-700">
+                  Đã thanh toán qua VNPay{contract.depositTxnRef ? ` (${contract.depositTxnRef})` : ""}
+                </span>
+              ) : (
+                <span className="font-semibold text-amber-700">
+                  {contract.status === "ACTIVE" ? "Đã xác nhận chuyển khoản" : "Đã xác nhận CK · chờ quản lý đối soát"}
+                </span>
+              )
+            ) : (
+              <span className="font-semibold text-rose-700">Chưa thanh toán tiền cọc</span>
+            )}
+          </div>
+        )}
       </div>
 
       {canSign && (
@@ -262,46 +288,158 @@ export function CustomerSignatureCard({
           <h4 className="m-0 text-sm font-bold text-teal-900">Ký hợp đồng trực tuyến</h4>
 
           {contract.depositAmount && contract.depositAmount > 0 && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              <div className="flex items-center justify-between font-semibold">
-                <span>Tiền đặt cọc giữ phòng (giữ đến khi hết hợp đồng):</span>
-                <span className="text-amber-700 text-sm">{vnd(contract.depositAmount)}</span>
+            contract.depositPaid ? (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <Icon name="check" size={15} className="text-emerald-600" />
+                    {contract.depositPaymentMethod === "VNPAY"
+                      ? "Đã thanh toán tiền cọc qua VNPay"
+                      : "Đã ghi nhận xác nhận tiền cọc"}
+                  </span>
+                  <span className="text-emerald-700 text-sm">{vnd(contract.depositAmount)}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-emerald-700 m-0">
+                  Hệ thống đã xác nhận tiền cọc giữ phòng{contract.depositTxnRef ? ` (Mã GD: ${contract.depositTxnRef})` : ""}. Bạn có thể ký hợp đồng điện tử ngay bên dưới.
+                </p>
               </div>
-              <p className="mt-1 text-[11px] text-amber-700 m-0">
-                Vui lòng thanh toán cọc trong vòng <b>2 ngày (48 giờ)</b> kể từ khi tạo nháp để hoàn tất ký kết và giữ phòng.
-              </p>
+            ) : (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="flex items-center justify-between font-semibold">
+                  <span>Tiền đặt cọc giữ phòng (giữ đến khi hết hợp đồng):</span>
+                  <span className="text-amber-700 text-sm">{vnd(contract.depositAmount)}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-amber-700 m-0">
+                  Vui lòng thanh toán cọc trong vòng <b>2 ngày (48 giờ)</b> kể từ khi tạo nháp để hoàn tất ký kết và giữ phòng.
+                </p>
 
-              <div className="mt-2.5 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className="cx-btn ghost !h-8 text-xs !text-teal-700 border-teal-300 bg-white"
-                  onClick={() => setShowDepositQr(!showDepositQr)}
-                >
-                  {showDepositQr ? "Ẩn mã QR cọc" : "Xem mã QR VietQR chuyển cọc"}
-                </button>
-                <label className="flex items-center gap-1.5 cursor-pointer font-medium">
-                  <input
-                    type="checkbox"
-                    checked={depositConfirmed}
-                    onChange={(e) => setDepositConfirmed(e.target.checked)}
-                  />
-                  <span>Tôi đã chuyển tiền cọc</span>
-                </label>
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className="cx-btn !h-8 !px-3.5 text-xs bg-teal-700 hover:bg-teal-800 text-white font-semibold flex items-center gap-1.5"
+                    onClick={() => setShowDepositVnpayModal(true)}
+                  >
+                    <Icon name="wallet" size={14} /> Thanh toán tiền cọc
+                  </button>
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium">
+                    <input
+                      type="checkbox"
+                      checked={depositConfirmed}
+                      onChange={(e) => setDepositConfirmed(e.target.checked)}
+                    />
+                    <span>Tôi đã chuyển tiền cọc</span>
+                  </label>
+                </div>
               </div>
+            )
+          )}
 
-              {showDepositQr && (
-                <div className="mt-3 flex flex-col items-center rounded-xl bg-white p-3 border border-amber-200">
-                  <img
-                    src={`https://qr.sepay.vn/img?acc=0348888999&bank=MBBank&amount=${contract.depositAmount}&des=COC%20HD${contract.id}`}
-                    alt="VietQR Deposit"
-                    className="h-44 w-44 object-contain rounded-lg"
-                  />
-                  <div className="mt-2 text-center text-[11px] text-slate-600">
-                    <div>Ngân hàng: <b>MBBank</b> · STK: <b>0348888999</b></div>
-                    <div>Nội dung: <code className="font-bold text-teal-800">COC HD{contract.id}</code></div>
+          {showDepositVnpayModal && contract.depositAmount && contract.depositAmount > 0 && (
+            <div
+              className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center shadow-inner">
+                      <Icon name="wallet" size={18} />
+                    </div>
+                    <div>
+                      <h3 className="m-0 text-base font-bold text-slate-900">
+                        Thanh toán tiền cọc
+                      </h3>
+                      <p className="text-xs text-slate-500 m-0">
+                        Hợp đồng #{contract.id} {contract.roomNumber ? `· Phòng ${contract.roomNumber}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer border-0 bg-transparent"
+                    onClick={() => setShowDepositVnpayModal(false)}
+                  >
+                    <Icon name="close" size={16} />
+                  </button>
+                </div>
+
+                <div className="my-5 space-y-3">
+                  <div className="rounded-2xl bg-teal-50/70 border border-teal-200/80 p-4 text-center">
+                    <span className="text-xs font-medium text-teal-800 block mb-0.5">Số tiền đặt cọc cần thanh toán</span>
+                    <span className="text-2xl font-black text-teal-950 tracking-tight">
+                      {vnd(contract.depositAmount)}
+                    </span>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Mã hợp đồng:</span>
+                      <span className="font-mono font-bold text-slate-800">#{contract.id}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Nội dung:</span>
+                      <b>Đặt cọc giữ phòng hợp đồng #{contract.id}</b>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-200/60">
+                      <span className="text-slate-500">Cổng thanh toán:</span>
+                      <div className="flex items-center gap-1.5 font-bold text-teal-800">
+                        <span className="w-2 h-2 rounded-full bg-teal-500" /> VNPay
+                      </div>
+                    </div>
                   </div>
                 </div>
-              )}
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={payingDepositVnpay}
+                    className="cx-btn !h-11 w-full bg-teal-700 hover:bg-teal-800 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-teal-800/20 disabled:opacity-60 cursor-pointer"
+                    onClick={async () => {
+                      try {
+                        setPayingDepositVnpay(true);
+                        const returnUrl =
+                          (import.meta.env.VITE_VNPAY_RETURN_URL as string | undefined) ||
+                          `${window.location.origin}/payment/vnpay-return`;
+                        const res = await billingApi.createDepositVnpayUrl({
+                          contractId: contract.id,
+                          returnUrl,
+                        });
+                        if (res?.paymentUrl) {
+                          window.location.href = res.paymentUrl;
+                        } else {
+                          setShowDepositVnpayModal(false);
+                          showErrorDialog("Không thể khởi tạo đường dẫn thanh toán VNPay");
+                        }
+                      } catch (e) {
+                        setShowDepositVnpayModal(false);
+                        showErrorDialog("Không thể khởi tạo thanh toán VNPay: " + errorText(e, "Vui lòng thử lại."));
+                      } finally {
+                        setPayingDepositVnpay(false);
+                      }
+                    }}
+                  >
+                    {payingDepositVnpay ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Đang kết nối tới VNPay...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="wallet" size={16} /> Thanh toán tiền cọc
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="cx-btn ghost !h-9 text-xs text-slate-500 hover:text-slate-700"
+                    onClick={() => setShowDepositVnpayModal(false)}
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -468,13 +606,26 @@ export function HomeExtras({
     try {
       const list = await contractsApi.mine();
       setContracts(list);
-      setSelectedId((current) =>
-        list.some((c) => sameId(c.id, current))
-          ? current
-          : (list.find((c) => c.status === "ACTIVE" && c.renewedFromContractId == null)
-              ?? list.find((c) => c.status === "ACTIVE")
-              ?? list[0])?.id ?? null,
-      );
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetContractId = urlParams.get("contractId");
+      const wantsSign = urlParams.get("action") === "sign";
+      setSelectedId((current) => {
+        if (targetContractId && list.some((c) => sameId(c.id, targetContractId))) {
+          return list.find((c) => sameId(c.id, targetContractId))!.id;
+        }
+        if (current && list.some((c) => sameId(c.id, current))) {
+          return current;
+        }
+        if (wantsSign) {
+          const awaiting =
+            list.find((c) => c.status === "DRAFT" && c.signatureStatus === "AWAITING_TENANT")
+            ?? list.find((c) => c.status === "DRAFT");
+          if (awaiting) return awaiting.id;
+        }
+        return (list.find((c) => c.status === "ACTIVE" && c.renewedFromContractId == null)
+          ?? list.find((c) => c.status === "ACTIVE")
+          ?? list[0])?.id ?? null;
+      });
     } catch (e) {
       setContracts([]);
       setContractsError(errorText(e));
@@ -632,10 +783,10 @@ export function HomeExtras({
   const isRenewalWindow = remainingDays != null && remainingDays <= 30 && remainingDays >= 0;
   const earliestEligibleDate = selected?.endDate
     ? (() => {
-        const d = new Date(`${selected.endDate}T00:00:00Z`);
-        d.setUTCDate(d.getUTCDate() - 30);
-        return d.toISOString().slice(0, 10);
-      })()
+      const d = new Date(`${selected.endDate}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - 30);
+      return d.toISOString().slice(0, 10);
+    })()
     : null;
 
   const minDate = todayVN();
@@ -905,11 +1056,10 @@ export function HomeExtras({
                     return (
                       <div
                         key={idStr(share.invoiceId)}
-                        className={`rounded-2xl border p-4 transition ${
-                          isMe
+                        className={`rounded-2xl border p-4 transition ${isMe
                             ? "border-teal-400 bg-white shadow-md ring-2 ring-teal-100"
                             : "border-line bg-surface/70"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
@@ -943,7 +1093,7 @@ export function HomeExtras({
                           </span>
                         </div>
 
-                        {/* Nút thanh toán VNPay Sandbox dành riêng cho người dùng hiện tại */}
+                        {/* Nút thanh toán VNPay dành riêng cho người dùng hiện tại */}
                         {isMe && !isPaid && myPendingInvoice && (
                           <div className="mt-3 pt-2 border-t border-dashed border-teal-200 flex flex-col gap-2">
                             <button
@@ -951,7 +1101,7 @@ export function HomeExtras({
                               className="cx-btn !h-9 w-full text-xs bg-teal-700 hover:bg-teal-800 flex items-center justify-center gap-1.5 font-bold shadow-sm"
                               onClick={() => setPayingInvoice(myPendingInvoice)}
                             >
-                              <Icon name="wallet" size={14} /> Thanh toán VNPay Sandbox ({fmtMoney(owed)}) →
+                              <Icon name="wallet" size={14} /> Thanh toán VNPay ({fmtMoney(owed)}) →
                             </button>
                           </div>
                         )}
@@ -1179,9 +1329,19 @@ export function HomeExtras({
               <div className="rounded-3xl border border-line bg-white p-6 md:p-8 shadow-sm">
                 <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center border-b border-line pb-4">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-extrabold text-lg text-slate-900">Hợp đồng #{selected.id}</span>
                       <span className={`cx-status ${statusClass[selected.status]}`}>{statusLabel[selected.status]}</span>
+                      {selected.status === "ACTIVE" && (
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          Đã ký đủ 2 bên
+                        </span>
+                      )}
+                      {selected.status === "DRAFT" && selected.signatureStatus === "AWAITING_LESSOR" && (
+                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[11px] font-semibold text-sky-700">
+                          Bạn đã ký · Chờ quản lý ký
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted mt-1">
                       Phòng {roomOf(selected.roomId)?.code ?? `#${selected.roomId}`} · {buildingOf(selected.buildingId) ?? `Tòa #${selected.buildingId}`}
@@ -1236,6 +1396,29 @@ export function HomeExtras({
                   <div className="rounded-xl bg-surface p-3 border border-line">
                     <dt className="text-xs text-muted">Tiền cọc phòng</dt>
                     <dd className="text-base font-bold text-slate-900">{fmtMoney(selected.depositAmount)}</dd>
+                    {(selected.depositAmount ?? 0) > 0 && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        {selected.depositPaid ? (
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${selected.depositPaymentMethod === "VNPAY"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-teal-50 text-teal-800 border border-teal-200"
+                            }`}>
+                            {selected.depositPaymentMethod === "VNPAY"
+                              ? "Đã cọc VNPay"
+                              : selected.status === "ACTIVE"
+                                ? "Đã xác nhận CK"
+                                : "Đã báo CK · chờ đối soát"}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                            Chờ thanh toán cọc
+                          </span>
+                        )}
+                        {selected.depositTxnRef && (
+                          <span className="font-mono text-muted">#{selected.depositTxnRef}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="rounded-xl bg-surface p-3 border border-line">
                     <dt className="text-xs text-muted">Giá điện</dt>
@@ -1365,8 +1548,8 @@ export function HomeExtras({
                             latestMoveOut.status === "PENDING"
                               ? `Đã gửi yêu cầu hẹn trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}. Đang chờ Ban quản lý xét duyệt.`
                               : latestMoveOut.status === "APPROVED"
-                              ? `Đã duyệt trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}. Xem chi tiết hoàn trả tiền cọc.`
-                              : `Yêu cầu trả phòng: ${moveOutLabel[latestMoveOut.status]}.`
+                                ? `Đã duyệt trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}. Xem chi tiết hoàn trả tiền cọc.`
+                                : `Yêu cầu trả phòng: ${moveOutLabel[latestMoveOut.status]}.`
                           ) : (
                             `Hợp đồng hết hạn vào ngày ${fmtDate(selected.endDate)}. Bạn có thể nộp yêu cầu trả phòng trước ngày kết thúc tối đa 30 ngày.`
                           )}
@@ -1393,17 +1576,17 @@ export function HomeExtras({
                               {latestRenewal.status === "PENDING"
                                 ? "Chờ duyệt"
                                 : latestRenewal.status === "REJECTED"
-                                ? "Bị từ chối"
-                                : latestRenewal.status === "CANCELLED"
-                                ? "Đã hủy"
-                                : renewalContract?.status === "ACTIVE" ||
-                                  renewalContract?.signatureStatus === "COMPLETED"
-                                ? "Đã gia hạn"
-                                : renewalContract?.signatureStatus === "AWAITING_TENANT"
-                                ? "Chờ bạn ký"
-                                : renewalContract?.signatureStatus === "AWAITING_LESSOR"
-                                ? "Chờ chủ nhà ký"
-                                : "Đã duyệt"}
+                                  ? "Bị từ chối"
+                                  : latestRenewal.status === "CANCELLED"
+                                    ? "Đã hủy"
+                                    : renewalContract?.status === "ACTIVE" ||
+                                      renewalContract?.signatureStatus === "COMPLETED"
+                                      ? "Đã gia hạn"
+                                      : renewalContract?.signatureStatus === "AWAITING_TENANT"
+                                        ? "Chờ bạn ký"
+                                        : renewalContract?.signatureStatus === "AWAITING_LESSOR"
+                                          ? "Chờ chủ nhà ký"
+                                          : "Đã duyệt"}
                             </span>
                           ) : (
                             <span className="cx-status mute">Chưa gửi yêu cầu</span>
@@ -1414,19 +1597,19 @@ export function HomeExtras({
                             latestRenewal.status === "PENDING"
                               ? `Đã gửi yêu cầu gia hạn ${latestRenewal.termMonths} tháng. Đang chờ Ban quản lý duyệt; chưa có hợp đồng mới ở bước này.`
                               : latestRenewal.status === "REJECTED"
-                              ? `Yêu cầu gia hạn bị từ chối${latestRenewal.rejectReason ? `: ${latestRenewal.rejectReason}` : "."} Bạn có thể gửi lại yêu cầu mới.`
-                              : latestRenewal.status === "CANCELLED"
-                              ? "Bạn đã hủy yêu cầu gia hạn trước đó. Có thể gửi lại yêu cầu mới."
-                              : renewalContract?.status === "ACTIVE" ||
-                                renewalContract?.signatureStatus === "COMPLETED"
-                              ? `Hợp đồng gia hạn đã có hiệu lực từ ${fmtDate(renewalContract?.startDate ?? latestRenewal.startDate)} đến ${fmtDate(renewalContract?.endDate ?? latestRenewal.endDate)}.`
-                              : renewalContract?.signatureStatus === "AWAITING_TENANT"
-                              ? "Ban quản lý đã duyệt và gửi hợp đồng mới! Vui lòng vào trang Yêu cầu để ký điện tử."
-                              : renewalContract?.signatureStatus === "AWAITING_LESSOR"
-                              ? "Bạn đã ký. Hợp đồng đang chờ Chủ nhà ký để hoàn tất."
-                              : renewalContract
-                              ? "Yêu cầu đã được duyệt. Ban quản lý đang soạn hợp đồng mới với đầy đủ điều khoản (giá thuê, tiền cọc, điện nước)."
-                              : "Yêu cầu đã được duyệt – đang chờ bên cho thuê gửi hợp đồng để ký."
+                                ? `Yêu cầu gia hạn bị từ chối${latestRenewal.rejectReason ? `: ${latestRenewal.rejectReason}` : "."} Bạn có thể gửi lại yêu cầu mới.`
+                                : latestRenewal.status === "CANCELLED"
+                                  ? "Bạn đã hủy yêu cầu gia hạn trước đó. Có thể gửi lại yêu cầu mới."
+                                  : renewalContract?.status === "ACTIVE" ||
+                                    renewalContract?.signatureStatus === "COMPLETED"
+                                    ? `Hợp đồng gia hạn đã có hiệu lực từ ${fmtDate(renewalContract?.startDate ?? latestRenewal.startDate)} đến ${fmtDate(renewalContract?.endDate ?? latestRenewal.endDate)}.`
+                                    : renewalContract?.signatureStatus === "AWAITING_TENANT"
+                                      ? "Ban quản lý đã duyệt và gửi hợp đồng mới! Vui lòng vào trang Yêu cầu để ký điện tử."
+                                      : renewalContract?.signatureStatus === "AWAITING_LESSOR"
+                                        ? "Bạn đã ký. Hợp đồng đang chờ Chủ nhà ký để hoàn tất."
+                                        : renewalContract
+                                          ? "Yêu cầu đã được duyệt. Ban quản lý đang soạn hợp đồng mới với đầy đủ điều khoản (giá thuê, tiền cọc, điện nước)."
+                                          : "Yêu cầu đã được duyệt – đang chờ bên cho thuê gửi hợp đồng để ký."
                           ) : (
                             `Tiếp tục gắn bó cùng tòa nhà với thời hạn hợp đồng chuẩn 12 tháng (1 năm). Thao tác gửi yêu cầu và ký hợp đồng tại trang Yêu cầu.`
                           )}
@@ -1573,7 +1756,7 @@ export function HomeExtras({
         </motion.div>
       )}
 
-      {/* POPUP THANH TOÁN TIỀN PHÒNG / TIỀN HÓA ĐƠN QUA VNPAY SANDBOX */}
+      {/* POPUP THANH TOÁN TIỀN PHÒNG / TIỀN HÓA ĐƠN QUA VNPAY */}
       {payingInvoice && (
         <div
           className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in"
@@ -1588,7 +1771,7 @@ export function HomeExtras({
                 </div>
                 <div>
                   <h3 className="m-0 text-base font-bold text-slate-900">
-                    Thanh toán VNPay Sandbox
+                    Thanh toán VNPay
                   </h3>
                   <p className="text-xs text-slate-500 m-0">
                     Hóa đơn tháng {payingInvoice.month}/{payingInvoice.year} · Phòng {roomOf(payingInvoice.roomId)?.code ?? `#${payingInvoice.roomId}`}
@@ -1628,16 +1811,8 @@ export function HomeExtras({
                 <div className="flex justify-between items-center pt-2 border-t border-slate-200/60">
                   <span className="text-slate-500">Cổng thanh toán:</span>
                   <div className="flex items-center gap-1.5 font-bold text-teal-800">
-                    <span className="w-2 h-2 rounded-full bg-teal-500" /> VNPay Sandbox
+                    <span className="w-2 h-2 rounded-full bg-teal-500" /> VNPay
                   </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-amber-50 border border-amber-200/70 p-3 text-[11px] text-amber-900 leading-relaxed flex items-start gap-2">
-                <Icon name="alert" size={16} className="shrink-0 mt-0.5 text-amber-600" />
-                <div>
-                  <b className="block text-amber-950 font-semibold mb-0.5">Môi trường thử nghiệm Sandbox</b>
-                  Bạn sẽ được chuyển hướng tới Cổng thanh toán VNPay Sandbox. Bạn có thể sử dụng thông tin thẻ ATM ngân hàng test (NCB, v.v.) được VNPay cấp sẵn để hoàn tất giao dịch.
                 </div>
               </div>
             </div>
@@ -1676,7 +1851,7 @@ export function HomeExtras({
                   </>
                 ) : (
                   <>
-                    <Icon name="wallet" size={16} /> Chuyển tới cổng thanh toán VNPay Sandbox →
+                    <Icon name="wallet" size={16} /> Chuyển tới cổng thanh toán VNPay →
                   </>
                 )}
               </button>

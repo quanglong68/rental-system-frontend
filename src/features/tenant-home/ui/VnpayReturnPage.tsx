@@ -3,6 +3,19 @@ import { useNavigate, useSearchParams } from "react-router";
 import { billingApi } from "@/api/billing";
 import { Icon } from "@/shared/ui";
 
+type ConfirmResult = Awaited<ReturnType<typeof billingApi.confirmVnpayPayment>>;
+const inFlightConfirms = new Map<string, Promise<ConfirmResult>>();
+
+function confirmOnce(key: string, params: Record<string, string>): Promise<ConfirmResult> {
+  const existing = inFlightConfirms.get(key);
+  if (existing) return existing;
+  const promise = billingApi.confirmVnpayPayment(params).finally(() => {
+    inFlightConfirms.delete(key);
+  });
+  inFlightConfirms.set(key, promise);
+  return promise;
+}
+
 export default function VnpayReturnPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -11,12 +24,25 @@ export default function VnpayReturnPage() {
   const [success, setSuccess] = useState(false);
   const [message, setMessage] = useState<string>("");
   const [amountVnd, setAmountVnd] = useState<number | null>(null);
+  const [confirmedContractId, setConfirmedContractId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   const txnRef = searchParams.get("vnp_TxnRef");
   const bankCode = searchParams.get("vnp_BankCode");
   const transactionNo = searchParams.get("vnp_TransactionNo");
   const responseCode = searchParams.get("vnp_ResponseCode");
+  const isDepositTxn = Boolean(txnRef?.startsWith("DEP")) || confirmedContractId != null;
+  const parsedDepositContractId = (() => {
+    if (confirmedContractId) return confirmedContractId;
+    if (!txnRef?.startsWith("DEP")) return null;
+    const body = txnRef.slice(3);
+    const sep = body.indexOf("_");
+    const idPart = sep > 0 ? body.slice(0, sep) : body;
+    return /^\d+$/.test(idPart) ? idPart : null;
+  })();
+  const returnDestination = isDepositTxn
+    ? `/my-room?action=sign${parsedDepositContractId ? `&contractId=${parsedDepositContractId}` : ""}#contract-signing-section`
+    : "/my-room";
 
   useEffect(() => {
     let active = true;
@@ -50,11 +76,20 @@ export default function VnpayReturnPage() {
       }
 
       try {
-        const res = await billingApi.confirmVnpayPayment(params);
+        const key = `${params.vnp_TxnRef || ""}:${retryCount}`;
+        const res = await confirmOnce(key, params);
         if (!active) return;
+        if (res.contractId != null) {
+          setConfirmedContractId(String(res.contractId));
+        }
         if (res.success) {
           setSuccess(true);
-          setMessage(res.message || "Thanh toán hóa đơn qua VNPay thành công!");
+          setMessage(
+            res.message ||
+              (res.contractId != null || params.vnp_TxnRef?.startsWith("DEP")
+                ? "Thanh toán tiền đặt cọc hợp đồng qua VNPay thành công!"
+                : "Thanh toán hóa đơn qua VNPay thành công!")
+          );
           if (res.amount) {
             setAmountVnd(res.amount);
           }
@@ -92,7 +127,9 @@ export default function VnpayReturnPage() {
             <div className="w-12 h-12 border-4 border-teal-200 border-t-teal-700 rounded-full animate-spin" />
             <h2 className="text-lg font-bold text-slate-800">Đang kiểm tra kết quả giao dịch VNPay...</h2>
             <p className="text-xs text-slate-500 max-w-xs">
-              Hệ thống đang đối soát chữ ký bảo mật và cập nhật trạng thái hóa đơn của bạn. Vui lòng chờ trong giây lát.
+              {isDepositTxn
+                ? "Hệ thống đang đối soát chữ ký bảo mật và cập nhật trạng thái tiền cọc hợp đồng của bạn. Vui lòng chờ trong giây lát."
+                : "Hệ thống đang đối soát chữ ký bảo mật và cập nhật trạng thái hóa đơn của bạn. Vui lòng chờ trong giây lát."}
             </p>
           </div>
         ) : success ? (
@@ -111,12 +148,20 @@ export default function VnpayReturnPage() {
 
             {amountVnd !== null && (
               <div className="py-3 px-4 bg-teal-50/70 border border-teal-200 rounded-2xl">
-                <span className="text-xs text-teal-800 block">Số tiền đã chuyển</span>
+                <span className="text-xs text-teal-800 block">
+                  {isDepositTxn ? "Tiền đặt cọc hợp đồng đã chuyển" : "Số tiền đã chuyển"}
+                </span>
                 <span className="text-2xl font-extrabold text-teal-900">{fmtVnd(amountVnd)}</span>
               </div>
             )}
 
             <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3.5 text-xs text-left space-y-2">
+              {parsedDepositContractId && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Hợp đồng:</span>
+                  <span className="font-semibold text-slate-800">#{parsedDepositContractId}</span>
+                </div>
+              )}
               {txnRef && (
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Mã tham chiếu:</span>
@@ -139,16 +184,17 @@ export default function VnpayReturnPage() {
               )}
               <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
                 <span className="text-slate-500">Cổng thanh toán:</span>
-                <span className="font-semibold text-teal-700">VNPay Sandbox</span>
+                <span className="font-semibold text-teal-700">VNPay</span>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => navigate("/my-room")}
+              onClick={() => navigate(returnDestination)}
               className="w-full cx-btn !h-11 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-teal-800/20"
             >
-              <Icon name="home" size={16} /> Về trang phòng của tôi
+              <Icon name={isDepositTxn ? "contract" : "home"} size={16} />{" "}
+              {isDepositTxn ? "Quay lại ký hợp đồng" : "Về trang phòng của tôi"}
             </button>
           </div>
         ) : (
@@ -193,14 +239,15 @@ export default function VnpayReturnPage() {
               )}
               <button
                 type="button"
-                onClick={() => navigate("/my-room")}
+                onClick={() => navigate(returnDestination)}
                 className={`w-full cx-btn !h-11 ${
                   responseCode === "00"
                     ? "ghost text-slate-600 hover:text-slate-900"
                     : "bg-teal-700 hover:bg-teal-800 text-white shadow-md"
                 } font-bold rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-all`}
               >
-                <Icon name="home" size={16} /> Quay lại trang phòng của tôi
+                <Icon name={isDepositTxn ? "contract" : "home"} size={16} />{" "}
+                {isDepositTxn ? "Quay lại ký hợp đồng" : "Quay lại trang phòng của tôi"}
               </button>
             </div>
           </div>

@@ -6,6 +6,7 @@ import {
   getNotifications,
   getUnreadCount,
   markNotificationRead,
+  notificationAdminTarget,
   type NotificationItem,
 } from "@/api/userNotification";
 import { Icon, toVNTime, type IconName } from "@/shared/ui";
@@ -135,6 +136,17 @@ export default function AdminLayout() {
     }
   };
 
+  const handleNotificationClick = async (n: NotificationItem) => {
+    if (!n.isRead) {
+      await handleMarkRead(n.id);
+    }
+    const target = notificationAdminTarget(n);
+    if (target) {
+      setNotificationsOpen(false);
+      navigate(target);
+    }
+  };
+
   if (!user || user.role === "CUSTOMER" || user.role === "UNKNOWN") return null;
   const role = user.role as StaffRole;
   const current = roles[role];
@@ -257,8 +269,8 @@ export default function AdminLayout() {
                     notis.map((n) => (
                       <div
                         key={n.id}
-                        className={`cursor-pointer border-b border-line px-1 py-2.5 last:border-b-0 ${n.isRead ? "opacity-60" : "font-semibold"}`}
-                        onClick={() => void handleMarkRead(n.id)}
+                        className={`cursor-pointer border-b border-line px-1 py-2.5 transition-colors hover:bg-slate-50 last:border-b-0 ${n.isRead ? "opacity-60" : "font-semibold"}`}
+                        onClick={() => void handleNotificationClick(n)}
                       >
                         <div className="text-[13px] leading-5">{n.title}</div>
                         <div className="mt-0.5 text-xs leading-5 text-muted line-clamp-2">{n.content}</div>
