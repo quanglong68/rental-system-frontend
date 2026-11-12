@@ -37,6 +37,10 @@ export type Contract = {
   endDate: string | null;
   rentAmount: number | null;
   depositAmount: number | null;
+  depositPaid?: boolean;
+  depositPaidAt?: string | null;
+  depositPaymentMethod?: string | null;
+  depositTxnRef?: string | null;
   terminationReason: string | null;
   createdAt: string;
   renewedFromContractId: Id | null;
@@ -263,9 +267,17 @@ export const contractsApi = {
     body.append("file", file);
     return apiFetch<{ key: string }>(`/api/v1/contracts/${id}/signature-image`, { method: "POST", body });
   },
-  /** Ký điện tử bằng mật khẩu đăng nhập; bên thuê ký trước, bên cho thuê ký sau. */
-  signElectronic: (id: Id, body: { password: string; signatureImageKey: string; acceptedTerms: boolean; consentVersion?: string }) =>
-    apiFetch<Contract>(`/api/v1/contracts/${id}/signatures`, { method: "POST", body }),
+  /** Ký điện tử bằng mật khẩu đăng nhập; bên thuê ký trước (có thể kèm depositConfirmed), bên cho thuê ký sau. */
+  signElectronic: (
+    id: Id,
+    body: {
+      password: string;
+      signatureImageKey: string;
+      acceptedTerms: boolean;
+      consentVersion?: string;
+      depositConfirmed?: boolean;
+    },
+  ) => apiFetch<Contract>(`/api/v1/contracts/${id}/signatures`, { method: "POST", body }),
   declineSignature: (id: Id, reason?: string) =>
     apiFetch<Contract>(`/api/v1/contracts/${id}/decline-signature`, { method: "POST", body: { reason } }),
   decline: (id: Id, reason?: string) =>

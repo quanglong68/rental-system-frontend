@@ -7,24 +7,91 @@ import { useRoomLookup } from "@/shared/lib/refLabels";
 import { Icon, PageHead, Pill, Tabs, useToast } from "@/shared/ui";
 import {
   billingApi,
+  type ClosingRoom,
   type HandoverRoom,
-  type Meter,
-  type MeterReading,
+  type InvoicePaymentStatus,
+  type MeterIndexItem,
   type MeterReadingOverview,
   type UtilityType,
 } from "@/api/billing";
 
 const errText = (e: unknown) => errorText(e);
 
-const HANDOVER_TAB = "Bàn giao khách mới";
-const CLOSING_TAB = "Chốt sổ cuối tháng";
+const HANDOVER_LABEL = "Bàn giao khách mới";
+type ActiveTab = "handover" | "closing";
 
-/** Kỳ chốt mặc định là tháng trước: chỉ số cuối tháng được nhập trong 5 ngày đầu tháng kế tiếp. */
-const previousPeriod = () => {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() - 1);
-  return { month: date.getMonth() + 1, year: date.getFullYear() };
+const padMonth = (m: number, y: number) => `${String(m).padStart(2, "0")}/${y}`;
+
+const vnTodayParts = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? "0");
+  return { year: pick("year"), month: pick("month"), day: pick("day") };
+};
+
+/**
+ * Phương án A (giờ Asia/Ho_Chi_Minh):
+ * - Từ ngày 28 đến cuối tháng: mặc định mở kỳ tháng hiện tại để chốt sổ cuối tháng.
+ * - Ngày 01..27: mặc định mở kỳ tháng trước (trong 5 ngày đầu tháng sẽ đối soát & chốt kỳ trước).
+ */
+const defaultPeriod = () => {
+  const { year, month, day } = vnTodayParts();
+  if (day >= 28) return { month, year };
+  const prev = new Date(year, month - 2, 1);
+  return { month: prev.getMonth() + 1, year: prev.getFullYear() };
+};
+
+const fmtIsoDateVN = (iso?: string | null) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+};
+
+const moveInDeltaLabel = (moveInDate: string) => {
+  const today = vnTodayParts();
+  const [y, m, d] = moveInDate.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const targetMs = Date.UTC(y, m - 1, d);
+  const todayMs = Date.UTC(today.year, today.month - 1, today.day);
+  const diffDays = Math.round((targetMs - todayMs) / 86_400_000);
+  if (diffDays === 0) return "chuyển vào hôm nay";
+  if (diffDays === 1) return "ngày mai";
+  if (diffDays > 1) return `còn ${diffDays} ngày nữa`;
+  if (diffDays === -1) return "hôm qua";
+  return `đã vào ${Math.abs(diffDays)} ngày trước`;
+};
+
+const pickElectricAndWater = (meters: MeterIndexItem[]) => {
+  const elecMeter = meters.find((m) => m.utilityTypeName?.toLowerCase().includes("điện")) ?? meters[0];
+  const waterMeter = meters.find((m) => m.utilityTypeName?.toLowerCase().includes("nước")) ?? elecMeter;
+  return { elecMeter, waterMeter };
+};
+
+type ClosingRow = {
+  roomKey: string;
+  roomId: Id;
+  roomNumber: string | null;
+  elecMeter: MeterIndexItem;
+  waterMeter: MeterIndexItem;
+  sharedMeter: boolean;
+  elecOld: number;
+  waterOld: number;
+  elecOldSource: string;
+  waterOldSource: string;
+  elecPrice: number;
+  waterPrice: number;
+  missing: boolean;
+  hasExistingReadings: boolean;
+  hasInvoice: boolean;
+  editable: boolean;
+  invoicePaymentStatus: InvoicePaymentStatus;
+  changed: boolean;
+  e: string;
+  w: string;
 };
 
 export default function MeterReading() {
@@ -32,20 +99,18 @@ export default function MeterReading() {
   const canWrite = hasAnyRole(user, ["QUAN_LY", "ADMIN", "KY_THUAT"]);
   const [toast, show] = useToast();
 
-  const initialPeriod = previousPeriod();
-  const [tab, setTab] = useState(CLOSING_TAB);
+  const initialPeriod = defaultPeriod();
+  const [tab, setTab] = useState<ActiveTab>("closing");
   const [selectedMonth, setSelectedMonth] = useState(initialPeriod.month);
   const [selectedYear, setSelectedYear] = useState(initialPeriod.year);
 
-  const [meters, setMeters] = useState<Meter[]>([]);
-  const [readings, setReadings] = useState<MeterReading[]>([]);
-  const [prevReadings, setPrevReadings] = useState<MeterReading[]>([]);
   const [utilityTypes, setUtilityTypes] = useState<UtilityType[]>([]);
   const [overview, setOverview] = useState<MeterReadingOverview | null>(null);
 
   const [values, setValues] = useState<Record<string, { e: string; w: string }>>({});
   const [handoverValues, setHandoverValues] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [confirmRow, setConfirmRow] = useState<ClosingRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -70,36 +135,17 @@ export default function MeterReading() {
     if (!silent) setLoading(true);
     setError("");
 
-    const prevMonthDate = new Date(selectedYear, selectedMonth - 2, 1);
-    const prevMonth = prevMonthDate.getMonth() + 1;
-    const prevYear = prevMonthDate.getFullYear();
-    const loadAllReadings = async (month: number, year: number) => {
-      const all: MeterReading[] = [];
-      for (let page = 0; ; page += 1) {
-        const res = await billingApi.meterReadings({ month, year, page, size: 100 });
-        all.push(...res.content);
-        if (page + 1 >= res.totalPages || page >= 20) break;
-      }
-      return all;
-    };
-
     try {
-      const [meterList, utilityList, readingList, prevReadingList, overviewRes] = await Promise.all([
-        billingApi.meters(),
+      const [utilityList, overviewRes] = await Promise.all([
         billingApi.utilityTypes(),
-        loadAllReadings(selectedMonth, selectedYear),
-        loadAllReadings(prevMonth, prevYear),
         billingApi.meterReadingOverview({ month: selectedMonth, year: selectedYear }),
       ]);
       if (!mounted.current || controller.signal.aborted) return;
-      setMeters(meterList);
       setUtilityTypes(utilityList);
-      setReadings(readingList);
-      setPrevReadings(prevReadingList);
       setOverview(overviewRes);
       if (!autoTabbed.current) {
         autoTabbed.current = true;
-        if (overviewRes.handoverRooms.length > 0) setTab(HANDOVER_TAB);
+        if (overviewRes.handoverRooms.some((r) => !r.completed)) setTab("handover");
       }
     } catch (e) {
       if (!mounted.current || controller.signal.aborted) return;
@@ -120,20 +166,25 @@ export default function MeterReading() {
     };
   }, [load, cancelCurrent]);
 
-  // Giá trị nháp gắn với kỳ đang xem; đổi kỳ thì bỏ nháp cũ.
   useEffect(() => {
     setValues({});
+    setConfirmRow(null);
   }, [selectedMonth, selectedYear]);
 
+  useEffect(() => {
+    if (!confirmRow) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setConfirmRow(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmRow]);
+
   const priceByType = new Map(utilityTypes.map((t) => [idStr(t.id), t.unitPrice]));
-  const readingByMeter = new Map(readings.map((r) => [idStr(r.meterId), r]));
-  const prevReadingByMeter = new Map(prevReadings.map((r) => [idStr(r.meterId), r]));
-  const oldSourceLabel = (hasPrevReading: boolean, reading: (typeof readings)[number] | undefined,
-    initialIndex: number) =>
-    hasPrevReading ? "kỳ trước" : reading && reading.prevIndex !== initialIndex ? "kỳ gần nhất" : "bàn giao";
   const roomOf = useRoomLookup([
-    ...meters.map((m) => m.roomId),
     ...(overview?.handoverRooms.map((r) => r.roomId) ?? []),
+    ...(overview?.closingRooms.map((r) => r.roomId) ?? []),
+    ...(overview?.missingRooms.map((r) => r.roomId) ?? []),
   ]);
   const roomLabel = (roomId: Id, fallback?: string | null) => {
     const room = roomOf(roomId);
@@ -141,60 +192,60 @@ export default function MeterReading() {
     return fallback ? `Phòng ${fallback}` : `Phòng #${idStr(roomId)}`;
   };
 
-  const roomsById = meters.reduce<Record<string, Meter[]>>((acc, meter) => {
-    const key = idStr(meter.roomId);
-    (acc[key] ??= []).push(meter);
-    return acc;
-  }, {});
+  const handoverRooms = overview?.handoverRooms ?? [];
+  const pendingHandoverCount = handoverRooms.filter((r) => !r.completed).length;
+  const missingRooms = overview?.missingRooms ?? [];
+  const missingByRoom = new Map(missingRooms.map((r) => [idStr(r.roomId), r]));
 
-  const missingRoomIds = new Set((overview?.missingRooms ?? []).map((r) => idStr(r.roomId)));
-  const missingByRoom = new Map((overview?.missingRooms ?? []).map((r) => [idStr(r.roomId), r]));
-  // Chỉ hiện phòng thuộc kỳ đang chốt: đã có chỉ số kỳ này hoặc được backend đánh dấu thiếu.
-  // Phòng mới bàn giao trong tháng chưa thuộc kỳ chốt nào nên không lẫn vào bảng cuối tháng.
-  const roomsWithClosingReading = new Set(readings.map((r) => idStr(r.roomId)));
-  const closingRoomKeys = new Set([...roomsWithClosingReading, ...missingRoomIds]);
-
-  const roomEntries = Object.entries(roomsById)
-    .filter(([roomKey]) => closingRoomKeys.has(roomKey))
-    .sort(([a], [b]) => a.localeCompare(b, "vi", { numeric: true }))
-    .map(([roomKey, roomMeters]) => {
-      const elecMeter =
-        roomMeters.find((m) => m.utilityTypeName?.toLowerCase().includes("điện")) ?? roomMeters[0];
-      const waterMeter =
-        roomMeters.find((m) => m.utilityTypeName?.toLowerCase().includes("nước")) ?? elecMeter;
-      const elecReading = readingByMeter.get(idStr(elecMeter.id));
-      const waterReading = readingByMeter.get(idStr(waterMeter.id));
-      const elecPrevReading = prevReadingByMeter.get(idStr(elecMeter.id));
-      const waterPrevReading = prevReadingByMeter.get(idStr(waterMeter.id));
+  const closingRooms: ClosingRoom[] = overview?.closingRooms ?? [];
+  const roomEntries: ClosingRow[] = closingRooms
+    .filter((cr) => cr.meters.length > 0)
+    .sort((a, b) => roomLabel(a.roomId, a.roomNumber).localeCompare(roomLabel(b.roomId, b.roomNumber), "vi", { numeric: true }))
+    .map((cr) => {
+      const roomKey = idStr(cr.roomId);
+      const { elecMeter, waterMeter } = pickElectricAndWater(cr.meters);
+      const sharedMeter = idStr(waterMeter.meterId) === idStr(elecMeter.meterId);
       const cur = values[roomKey] ?? {
-        e: elecReading?.currentIndex?.toString() ?? "",
-        w: waterReading?.currentIndex?.toString() ?? "",
+        e: elecMeter.currentIndex != null ? String(elecMeter.currentIndex) : "",
+        w: waterMeter.currentIndex != null ? String(waterMeter.currentIndex) : "",
       };
+      const elecChanged = elecMeter.currentIndex == null || Number(cur.e) !== elecMeter.currentIndex;
+      const waterChanged = !sharedMeter && (waterMeter.currentIndex == null || Number(cur.w) !== waterMeter.currentIndex);
       return {
         roomKey,
-        roomId: roomMeters[0].roomId,
+        roomId: cr.roomId,
+        roomNumber: cr.roomNumber,
         elecMeter,
         waterMeter,
-        elecReading,
-        waterReading,
-        sharedMeter: idStr(waterMeter.id) === idStr(elecMeter.id),
-        elecOld: elecPrevReading?.currentIndex ?? elecReading?.prevIndex ?? elecMeter.initialIndex,
-        waterOld: waterPrevReading?.currentIndex ?? waterReading?.prevIndex ?? waterMeter.initialIndex,
-        elecOldSource: oldSourceLabel(!!elecPrevReading, elecReading, elecMeter.initialIndex),
-        waterOldSource: oldSourceLabel(!!waterPrevReading, waterReading, waterMeter.initialIndex),
-        elecPrice: elecReading?.unitPrice ?? priceByType.get(idStr(elecMeter.utilityTypeId)) ?? 0,
-        waterPrice: waterReading?.unitPrice ?? priceByType.get(idStr(waterMeter.utilityTypeId)) ?? 0,
-        missing: missingRoomIds.has(roomKey),
+        sharedMeter,
+        elecOld: elecMeter.prevIndex ?? elecMeter.initialIndex,
+        waterOld: waterMeter.prevIndex ?? waterMeter.initialIndex,
+        elecOldSource: elecMeter.prevIndexSource ?? "bàn giao",
+        waterOldSource: waterMeter.prevIndexSource ?? "bàn giao",
+        elecPrice: elecMeter.unitPrice ?? (elecMeter.utilityTypeId != null ? priceByType.get(idStr(elecMeter.utilityTypeId)) : 0) ?? 0,
+        waterPrice: waterMeter.unitPrice ?? (waterMeter.utilityTypeId != null ? priceByType.get(idStr(waterMeter.utilityTypeId)) : 0) ?? 0,
+        missing: cr.missingReading,
+        hasExistingReadings: cr.hasExistingReadings,
+        hasInvoice: cr.hasInvoice,
+        editable: cr.editable,
+        invoicePaymentStatus: cr.invoicePaymentStatus,
+        changed: elecChanged || waterChanged,
         e: cur.e,
         w: cur.w,
       };
     });
 
-  const handleChange = (row: (typeof roomEntries)[number], kind: "e" | "w", value: string) => {
+  const handleChange = (row: ClosingRow, kind: "e" | "w", value: string) => {
     setValues((prev) => ({
       ...prev,
       [row.roomKey]: { ...(prev[row.roomKey] ?? { e: row.e, w: row.w }), [kind]: value.replace(/\D/g, "") },
     }));
+  };
+
+  const handoverInputVal = (entered: Record<string, string>, meter: HandoverRoom["meters"][number]) => {
+    const key = idStr(meter.meterId);
+    if (key in entered) return entered[key];
+    return meter.initialIndex != null ? String(meter.initialIndex) : "";
   };
 
   const setHandoverValue = (roomId: Id, meterId: Id, value: string) => {
@@ -205,37 +256,30 @@ export default function MeterReading() {
     }));
   };
 
-  const handleSave = async (r: (typeof roomEntries)[number]) => {
+  const executeSave = async (r: ClosingRow) => {
     const eVal = Number(r.e);
     const wVal = Number(r.w);
-    if (!r.e || (!r.sharedMeter && !r.w)) return;
-    if (eVal < r.elecOld || (!r.sharedMeter && wVal < r.waterOld)) {
-      setActionError(`${roomLabel(r.roomId)}: chỉ số mới không được nhỏ hơn kỳ trước.`);
-      return;
-    }
-
     setSaving((prev) => new Set([...prev, r.roomKey]));
     setActionError("");
     try {
-      if (!r.elecReading || r.elecReading.currentIndex !== eVal) {
-        if (r.elecReading) {
-          await billingApi.updateMeterReading(r.elecReading.id, { currentIndex: eVal });
+      if (r.elecMeter.currentIndex !== eVal || r.elecMeter.readingId == null) {
+        if (r.elecMeter.readingId != null) {
+          await billingApi.updateMeterReading(r.elecMeter.readingId, { currentIndex: eVal });
         } else {
           await billingApi.createMeterReading({
-            meterId: r.elecMeter.id,
+            meterId: r.elecMeter.meterId,
             month: selectedMonth,
             year: selectedYear,
             currentIndex: eVal,
           });
         }
       }
-      // Phòng chỉ có một đồng hồ thì điện và nước cùng trỏ về một meter; chỉ ghi một lần.
-      if (!r.sharedMeter && (!r.waterReading || r.waterReading.currentIndex !== wVal)) {
-        if (r.waterReading) {
-          await billingApi.updateMeterReading(r.waterReading.id, { currentIndex: wVal });
+      if (!r.sharedMeter && (r.waterMeter.currentIndex !== wVal || r.waterMeter.readingId == null)) {
+        if (r.waterMeter.readingId != null) {
+          await billingApi.updateMeterReading(r.waterMeter.readingId, { currentIndex: wVal });
         } else {
           await billingApi.createMeterReading({
-            meterId: r.waterMeter.id,
+            meterId: r.waterMeter.meterId,
             month: selectedMonth,
             year: selectedYear,
             currentIndex: wVal,
@@ -243,11 +287,21 @@ export default function MeterReading() {
         }
       }
       if (!mounted.current) return;
-      show(`Đã lưu chỉ số ${roomLabel(r.roomId)} · hóa đơn tự sinh khi đủ chỉ số`);
+      show(
+        r.invoicePaymentStatus === "UNPAID"
+          ? `Đã cập nhật chỉ số ${roomLabel(r.roomId, r.roomNumber)} và tính lại hóa đơn`
+          : `Đã lưu chỉ số ${roomLabel(r.roomId, r.roomNumber)} · hóa đơn tự sinh khi đủ chỉ số`,
+      );
+      setValues((prev) => {
+        const next = { ...prev };
+        delete next[r.roomKey];
+        return next;
+      });
     } catch (e) {
       if (!mounted.current) return;
       setActionError(errText(e));
     } finally {
+      setConfirmRow(null);
       await load(true);
       if (!mounted.current) return;
       setSaving((prev) => {
@@ -258,18 +312,35 @@ export default function MeterReading() {
     }
   };
 
+  const handleRequestSave = (r: ClosingRow) => {
+    if (!r.editable || overview?.futurePeriod) return;
+    const eVal = Number(r.e);
+    const wVal = Number(r.w);
+    if (!r.e || (!r.sharedMeter && !r.w)) return;
+    if (eVal < r.elecOld || (!r.sharedMeter && wVal < r.waterOld)) {
+      setActionError(`${roomLabel(r.roomId, r.roomNumber)}: chỉ số mới không được nhỏ hơn kỳ trước.`);
+      return;
+    }
+    if (r.invoicePaymentStatus === "UNPAID" || (r.hasExistingReadings && r.changed)) {
+      setConfirmRow(r);
+      return;
+    }
+    void executeSave(r);
+  };
+
   const handleSaveHandover = async (room: HandoverRoom) => {
     const roomKey = idStr(room.roomId);
     const entered = handoverValues[roomKey] ?? {};
-    const readings = room.meters.map((meter) => ({
+    const resolved = room.meters.map((meter) => ({
       meterId: meter.meterId,
-      currentIndex: Number(entered[idStr(meter.meterId)]),
+      raw: handoverInputVal(entered, meter),
     }));
-    if (readings.some((r) => entered[idStr(r.meterId)] === undefined || entered[idStr(r.meterId)] === "")) {
+    if (resolved.some((r) => r.raw === "")) {
       setActionError(`${roomLabel(room.roomId, room.roomNumber)}: nhập đủ chỉ số bàn giao cho tất cả đồng hồ.`);
       return;
     }
-    if (readings.some((r) => !Number.isFinite(r.currentIndex) || r.currentIndex < 0)) {
+    const payload = resolved.map((r) => ({ meterId: r.meterId, currentIndex: Number(r.raw) }));
+    if (payload.some((r) => !Number.isFinite(r.currentIndex) || r.currentIndex < 0)) {
       setActionError(`${roomLabel(room.roomId, room.roomNumber)}: chỉ số bàn giao không hợp lệ.`);
       return;
     }
@@ -277,7 +348,7 @@ export default function MeterReading() {
     setSaving((prev) => new Set([...prev, roomKey]));
     setActionError("");
     try {
-      await billingApi.saveHandover({ roomId: room.roomId, readings });
+      await billingApi.saveHandover({ contractId: room.contractId, roomId: room.roomId, readings: payload });
       if (!mounted.current) return;
       show(`Đã ghi chỉ số bàn giao ${roomLabel(room.roomId, room.roomNumber)}`);
       setHandoverValues((prev) => {
@@ -322,19 +393,22 @@ export default function MeterReading() {
     );
   }
 
-  const currentDate = new Date();
-  const monthLabel = `${String(selectedMonth).padStart(2, "0")}/${selectedYear}`;
-  const handoverRooms = overview?.handoverRooms ?? [];
-  const missingRooms = overview?.missingRooms ?? [];
-  const closingTotal = closingRoomKeys.size;
-  const closingDone = roomsWithClosingReading.size;
+  const currentYearVN = vnTodayParts().year;
+  const monthLabel = padMonth(selectedMonth, selectedYear);
+  const nextMonthDate = new Date(selectedYear, selectedMonth, 1);
+  const nextMonthLabel = padMonth(nextMonthDate.getMonth() + 1, nextMonthDate.getFullYear());
+
+  const closingTotal = roomEntries.length;
+  const closingDone = roomEntries.filter((r) => !r.missing && (r.hasExistingReadings || (!!r.e && (r.sharedMeter || !!r.w)))).length;
+  const handoverTabLabel = `${HANDOVER_LABEL} (${pendingHandoverCount})`;
+  const closingTabLabel = `Chốt chỉ số kỳ ${monthLabel}`;
 
   return (
     <>
       <PageHead
-        eyebrow={`Bàn giao & chốt sổ · theo tòa được phân quyền`}
+        eyebrow="Bàn giao & chốt sổ · theo tòa được phân quyền"
         title="Chỉ số điện nước"
-        desc="Tách riêng 2 việc: ghi chỉ số bàn giao khi khách chuyển vào và chốt chỉ số cuối tháng. Hóa đơn tự động sinh ngay khi đủ chỉ số."
+        desc="Tách riêng 2 việc: ghi chỉ số bàn giao khi khách mới ký hợp đồng và chốt chỉ số định kỳ từng tháng. Hóa đơn tự động sinh hoặc cập nhật khi đủ chỉ số."
         actions={
           <>
             <select
@@ -351,11 +425,9 @@ export default function MeterReading() {
               value={selectedYear}
               onChange={(ev) => setSelectedYear(Number(ev.target.value))}
             >
-              {[currentDate.getFullYear() - 1, currentDate.getFullYear(), currentDate.getFullYear() + 1].map(
-                (y) => (
-                  <option key={y} value={y}>{y}</option>
-                ),
-              )}
+              {[currentYearVN - 1, currentYearVN, currentYearVN + 1].map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
             </select>
             <button className="secondary-button" onClick={() => void load()}>
               <Icon name="clock" size={16} /> Tải lại
@@ -372,53 +444,73 @@ export default function MeterReading() {
       )}
       {actionError && <div className="alert alert-error mb-4"><Icon name="shield" size={18} /><div>{actionError}</div></div>}
 
-      {overview?.firstFiveDays && (
+      {overview?.futurePeriod ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-4 flex items-start gap-2.5">
+          <Icon name="clock" size={18} />
+          <div>
+            <b>Kỳ {monthLabel} chưa tới (tháng tương lai).</b> Hệ thống chỉ cho phép ghi nhận chỉ số cho tháng hiện tại hoặc các tháng trước đó.
+          </div>
+        </div>
+      ) : overview?.firstFiveDays ? (
         <div className="alert alert-info mb-4">
           <Icon name="bell" size={18} />
           <div>
-            <b>Đang trong 5 ngày đầu tháng.</b> Nhập chỉ số cuối tháng {monthLabel} trước ngày 05.
-            Hệ thống gửi nhắc tự động vào chuông mỗi ngày lúc 08:00 cho tới khi đủ chỉ số.
+            <b>Đang trong 5 ngày đầu tháng {nextMonthLabel}.</b> Chỉ số kỳ <b>{monthLabel}</b> được nhập và đối soát trong 5 ngày đầu tháng <b>{nextMonthLabel}</b>.
+            Hệ thống gửi nhắc chuông tự động mỗi ngày lúc 08:00 cho tới khi đủ chỉ số.
+          </div>
+        </div>
+      ) : overview?.endOfMonthReminder ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-4 flex items-start gap-2.5">
+          <Icon name="bell" size={18} />
+          <div>
+            <b>Đang trong đợt chốt chỉ số cuối tháng (từ ngày 28/{monthLabel}).</b> Hãy chốt chỉ số kỳ <b>{monthLabel}</b> cho các phòng đang ở trước khi bước sang tháng {nextMonthLabel}.
+          </div>
+        </div>
+      ) : (
+        <div className="alert alert-info mb-4">
+          <Icon name="clock" size={18} />
+          <div>
+            <b>Lịch chốt kỳ {monthLabel}:</b> Chỉ số kỳ <b>{monthLabel}</b> sẽ được nhập chính thức vào 5 ngày đầu tháng <b>{nextMonthLabel}</b> (và có thể nhập từ ngày 28/{monthLabel} trở đi).
+            Bạn vẫn có thể xem, nhập trước hoặc điều chỉnh chỉ số kỳ <b>{monthLabel}</b> nếu hóa đơn chưa thanh toán.
           </div>
         </div>
       )}
+
       {missingRooms.length > 0 && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 mb-4 flex items-start gap-2">
           <Icon name="shield" size={18} />
           <div>
-            <b>Còn {missingRooms.length} phòng chưa nhập chỉ số kỳ {monthLabel}.</b>{" "}
-            {overview?.firstFiveDays
-              ? "Các phòng này đang được đánh dấu đỏ và yêu cầu nhập."
-              : "Đã qua 5 ngày đầu tháng nhưng vẫn có thể nhập bổ sung; các phòng thiếu được đánh dấu đỏ."}{" "}
-            Hóa đơn chỉ tự sinh khi phòng đã đủ chỉ số điện và nước.
+            <b>Còn {missingRooms.length} phòng chưa nhập đủ chỉ số kỳ {monthLabel}.</b>{" "}
+            Các phòng thiếu đang được đánh dấu đỏ yêu cầu nhập. Hóa đơn chỉ tự sinh khi phòng có đủ chỉ số điện và nước.
           </div>
         </div>
       )}
 
       <div className="mb-5">
         <Tabs
-          items={[`${HANDOVER_TAB} (${handoverRooms.length})`, `${CLOSING_TAB} (${monthLabel})`]}
-          value={tab === HANDOVER_TAB ? `${HANDOVER_TAB} (${handoverRooms.length})` : `${CLOSING_TAB} (${monthLabel})`}
-          onChange={(v) => setTab(v.startsWith(HANDOVER_TAB) ? HANDOVER_TAB : CLOSING_TAB)}
+          items={[handoverTabLabel, closingTabLabel]}
+          value={tab === "handover" ? handoverTabLabel : closingTabLabel}
+          onChange={(v) => setTab(v.startsWith(HANDOVER_LABEL) ? "handover" : "closing")}
         />
       </div>
 
-      {tab === HANDOVER_TAB ? (
+      {tab === "handover" ? (
         <>
           <div className="alert alert-info mb-4">
             <Icon name="home" size={18} />
             <div>
-              <b>Chỉ số bàn giao</b> là mốc đầu tiên khi khách nhận phòng, không tính tiền và không tạo hóa đơn.
-              Chỉ số này được dùng làm chỉ số cũ cho lần chốt cuối tháng đầu tiên của khách.
+              <b>Chỉ số bàn giao</b> được kích hoạt ngay khi quản lý và khách ký xong hợp đồng. Mỗi phòng mới đã được tạo sẵn đồng hồ điện/nước với chỉ số kế thừa thực tế (khác 0);
+              lưu xong dòng sẽ được đánh dấu <b>Đã nhập chỉ số bàn giao</b> và giữ lại để kỹ thuật đối chiếu.
             </div>
           </div>
           <article className="panel">
             <div className="panel-header">
               <div>
-                <h2>Khách chuyển vào trong tháng</h2>
-                <p>Ghi chỉ số ngay ngày bàn giao; thông báo nhắc được gửi cho kỹ thuật phụ trách tòa.</p>
+                <h2>Khách mới ký hợp đồng &amp; bàn giao phòng</h2>
+                <p>Ghi chỉ số thực tế lúc giao phòng để làm mốc ban đầu cho kỳ chốt đầu tiên.</p>
               </div>
-              <Pill tone={handoverRooms.length ? "amber" : "teal"}>
-                {handoverRooms.length ? `${handoverRooms.length} phòng chờ bàn giao` : "Đã bàn giao đủ"}
+              <Pill tone={pendingHandoverCount > 0 ? "amber" : "teal"}>
+                {pendingHandoverCount > 0 ? `${pendingHandoverCount} phòng chờ bàn giao` : "Đã bàn giao đủ"}
               </Pill>
             </div>
             <div className="overflow-x-auto">
@@ -428,14 +520,14 @@ export default function MeterReading() {
                     <th>Phòng</th>
                     <th>Ngày chuyển vào</th>
                     <th>Chỉ số bàn giao</th>
-                    <th></th>
+                    <th className="text-right">Trạng thái / Hành động</th>
                   </tr>
                 </thead>
                 <tbody>
                   {handoverRooms.length === 0 && (
                     <tr>
                       <td colSpan={4} className="py-10 text-center text-sm text-muted">
-                        Không có khách mới nào cần ghi chỉ số bàn giao.
+                        Không có khách mới nào trong kỳ cần ghi chỉ số bàn giao.
                       </td>
                     </tr>
                   )}
@@ -443,9 +535,10 @@ export default function MeterReading() {
                     const roomKey = idStr(room.roomId);
                     const entered = handoverValues[roomKey] ?? {};
                     const isSaving = saving.has(roomKey);
-                    const complete = room.meters.every((m) => (entered[idStr(m.meterId)] ?? "") !== "");
+                    const complete = room.meters.every((m) => handoverInputVal(entered, m) !== "");
+                    const deltaLabel = moveInDeltaLabel(room.moveInDate);
                     return (
-                      <tr key={roomKey} className="!cursor-default">
+                      <tr key={`${roomKey}-${idStr(room.contractId)}`} className="!cursor-default">
                         <td>
                           <b>{roomLabel(room.roomId, room.roomNumber)}</b>
                           <div className="sub">
@@ -453,31 +546,52 @@ export default function MeterReading() {
                           </div>
                         </td>
                         <td>
-                          <b>{new Date(room.moveInDate).toLocaleDateString("vi-VN")}</b>
-                          <div className="sub">hôm nay</div>
-                        </td>
-                        <td>
-                          <div className="flex flex-wrap items-center gap-3">
-                            {room.meters.map((meter) => (
-                              <label key={idStr(meter.meterId)} className="flex items-center gap-2">
-                                <span className="text-xs text-muted">
-                                  {meter.utilityTypeName ?? "Đồng hồ"}
-                                  <span className="sub block">mốc cũ {meter.initialIndex}</span>
-                                </span>
-                                <input
-                                  className="meter-input"
-                                  inputMode="numeric"
-                                  value={entered[idStr(meter.meterId)] ?? ""}
-                                  onChange={(ev) => setHandoverValue(room.roomId, meter.meterId, ev.target.value)}
-                                  placeholder="Chỉ số"
-                                  disabled={isSaving}
-                                />
-                              </label>
-                            ))}
+                          <b>{fmtIsoDateVN(room.moveInDate)}</b>
+                          <div className="sub">
+                            {room.completed && room.handoverDate
+                              ? `đã ghi bàn giao ${fmtIsoDateVN(room.handoverDate)}`
+                              : deltaLabel}
                           </div>
                         </td>
+                        <td>
+                          {room.completed ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {room.meters.map((meter) => (
+                                <span
+                                  key={idStr(meter.meterId)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-xs font-medium text-emerald-900"
+                                >
+                                  <span>{meter.utilityTypeName ?? "Đồng hồ"}:</span>
+                                  <b>{meter.initialIndex}</b>
+                                  {meter.unit && <span className="text-emerald-700">{meter.unit}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-3">
+                              {room.meters.map((meter) => (
+                                <label key={idStr(meter.meterId)} className="flex items-center gap-2">
+                                  <span className="text-xs text-muted">
+                                    {meter.utilityTypeName ?? "Đồng hồ"}
+                                    <span className="sub block">số hiện có: {meter.initialIndex}</span>
+                                  </span>
+                                  <input
+                                    className="meter-input"
+                                    inputMode="numeric"
+                                    value={handoverInputVal(entered, meter)}
+                                    onChange={(ev) => setHandoverValue(room.roomId, meter.meterId, ev.target.value)}
+                                    placeholder={String(meter.initialIndex)}
+                                    disabled={isSaving}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </td>
                         <td className="text-right">
-                          {isSaving ? (
+                          {room.completed ? (
+                            <Pill tone="teal">Đã nhập chỉ số bàn giao</Pill>
+                          ) : isSaving ? (
                             <span className="text-xs text-muted">Đang lưu…</span>
                           ) : canWrite ? (
                             <button
@@ -487,7 +601,9 @@ export default function MeterReading() {
                             >
                               Lưu bàn giao
                             </button>
-                          ) : null}
+                          ) : (
+                            <Pill tone="amber">Chờ kỹ thuật nhập</Pill>
+                          )}
                         </td>
                       </tr>
                     );
@@ -502,9 +618,8 @@ export default function MeterReading() {
           <div className="alert alert-info mb-4">
             <Icon name="clock" size={18} />
             <div>
-              <b>Cách hệ thống lấy chỉ số cũ:</b> phòng đã chốt tháng trước lấy <b>chỉ số chốt kỳ trước</b>;
-              phòng mới bàn giao chưa có chỉ số lấy <b>mốc bàn giao</b>. Lưu chỉ số xong, hóa đơn của phòng
-              được sinh tự động, không cần quản lý bấm phát hành.
+              <b>Quy tắc chỉnh sửa &amp; tính hóa đơn:</b> Hóa đơn chưa thanh toán cho phép kỹ thuật cập nhật lại chỉ số và hệ thống <b>tự động cập nhật hóa đơn của khách</b>.
+              Khi hóa đơn kỳ đó đã thanh toán, ô nhập bị khóa để bảo toàn đối soát tài chính.
             </div>
           </div>
           <article className="panel">
@@ -526,12 +641,19 @@ export default function MeterReading() {
                     <th>Nước cũ → mới</th>
                     <th>Đơn giá áp dụng</th>
                     <th className="text-right">Điện + nước</th>
+                    <th>Hóa đơn kỳ</th>
                     <th className="text-right">Hành động</th>
                   </tr>
                 </thead>
                 <tbody>
                   {roomEntries.length === 0 && (
-                    <tr><td colSpan={6} className="py-10 text-center text-sm text-muted">Chưa có phòng nào cần chốt chỉ số cho kỳ này.</td></tr>
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-sm text-muted">
+                        {overview?.futurePeriod
+                          ? `Kỳ ${monthLabel} chưa tới hạn chốt chỉ số.`
+                          : "Không có phòng đang thuê nào trong kỳ này."}
+                      </td>
+                    </tr>
                   )}
                   {roomEntries.map((r) => {
                     const de = r.e ? Number(r.e) - r.elecOld : 0;
@@ -541,13 +663,14 @@ export default function MeterReading() {
                     const isSaving = saving.has(r.roomKey);
                     const rowFilled = !!r.e && (r.sharedMeter || !!r.w);
                     const missingInfo = missingByRoom.get(r.roomKey);
+                    const locked = !canWrite || !r.editable || !!overview?.futurePeriod;
                     return (
                       <tr
                         key={r.roomKey}
                         className={`!cursor-default ${r.missing ? "bg-red-50/80" : ""}`}
                       >
                         <td>
-                          <b>{roomLabel(r.roomId)}</b>
+                          <b>{roomLabel(r.roomId, r.roomNumber)}</b>
                           <div className="sub">
                             {r.sharedMeter
                               ? `${r.elecMeter.utilityTypeName ?? "Điện"} · chưa có đồng hồ nước riêng`
@@ -556,7 +679,7 @@ export default function MeterReading() {
                         </td>
                         <td>
                           <div className="flex items-center gap-2">
-                            <span className="w-14 shrink-0 text-muted">
+                            <span className="w-16 shrink-0 text-muted">
                               <b>{r.elecOld}</b>
                               <span className="sub block">{r.elecOldSource}</span>
                             </span>
@@ -566,7 +689,7 @@ export default function MeterReading() {
                               value={r.e}
                               onChange={(ev) => handleChange(r, "e", ev.target.value)}
                               placeholder="kWh"
-                              disabled={isSaving}
+                              disabled={isSaving || locked}
                             />
                           </div>
                         </td>
@@ -575,7 +698,7 @@ export default function MeterReading() {
                             <span className="text-xs text-muted">Chưa có đồng hồ nước</span>
                           ) : (
                             <div className="flex items-center gap-2">
-                              <span className="w-14 shrink-0 text-muted">
+                              <span className="w-16 shrink-0 text-muted">
                                 <b>{r.waterOld}</b>
                                 <span className="sub block">{r.waterOldSource}</span>
                               </span>
@@ -585,7 +708,7 @@ export default function MeterReading() {
                                 value={r.w}
                                 onChange={(ev) => handleChange(r, "w", ev.target.value)}
                                 placeholder="m³"
-                                disabled={isSaving}
+                                disabled={isSaving || locked}
                               />
                             </div>
                           )}
@@ -602,15 +725,22 @@ export default function MeterReading() {
                           ) : rowFilled ? (
                             <>
                               <b>{vnd(sum)}</b>
-                              <div className="sub">{de} kWh · {dw} m³</div>
+                              <div className="sub">{de} kWh{!r.sharedMeter ? ` · ${dw} m³` : ""}</div>
                             </>
                           ) : (
                             <span className="text-muted">—</span>
                           )}
                         </td>
-                        <td className="text-right">
-                          {r.missing && !rowFilled ? (
-                            <div className="flex flex-col items-end gap-1">
+                        <td>
+                          {r.invoicePaymentStatus === "PAID" ? (
+                            <Pill tone="teal">Hóa đơn đã thanh toán</Pill>
+                          ) : r.invoicePaymentStatus === "UNPAID" ? (
+                            <div className="flex flex-col items-start gap-1">
+                              <Pill tone="amber">Chưa thanh toán · được sửa</Pill>
+                              <span className="text-[11px] text-amber-800">Lưu sẽ tự cập nhật hóa đơn</span>
+                            </div>
+                          ) : r.missing && !rowFilled ? (
+                            <div className="flex flex-col items-start gap-1">
                               <Pill tone="coral">Yêu cầu nhập</Pill>
                               {missingInfo && (
                                 <span className="text-[11px] text-red-700">
@@ -618,18 +748,30 @@ export default function MeterReading() {
                                 </span>
                               )}
                             </div>
+                          ) : r.hasExistingReadings ? (
+                            <Pill tone="slate">Đã chốt · chờ hóa đơn</Pill>
+                          ) : (
+                            <span className="text-xs text-muted">Chưa chốt</span>
+                          )}
+                        </td>
+                        <td className="text-right">
+                          {r.invoicePaymentStatus === "PAID" ? (
+                            <span className="text-xs font-medium text-muted">Đã khóa sửa</span>
+                          ) : overview?.futurePeriod || !canWrite ? (
+                            <span className="text-xs text-muted">—</span>
                           ) : !rowFilled || bad ? (
                             <span className="text-xs text-muted">—</span>
                           ) : isSaving ? (
                             <span className="text-xs text-muted">Đang lưu…</span>
-                          ) : canWrite ? (
+                          ) : (
                             <button
                               className="text-button text-teal"
-                              onClick={() => void handleSave(r)}
+                              disabled={r.hasExistingReadings && !r.changed}
+                              onClick={() => handleRequestSave(r)}
                             >
-                              Lưu
+                              {r.hasExistingReadings ? "Cập nhật" : "Lưu"}
                             </button>
-                          ) : null}
+                          )}
                         </td>
                       </tr>
                     );
@@ -640,6 +782,74 @@ export default function MeterReading() {
           </article>
         </>
       )}
+
+      {confirmRow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-xs"
+          onClick={() => !saving.has(confirmRow.roomKey) && setConfirmRow(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-meter-title"
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-line bg-white p-6 shadow-2xl"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                <Icon name="bell" size={20} />
+              </div>
+              <div>
+                <h3 id="confirm-meter-title" className="m-0 text-base font-bold text-slate-900">
+                  Xác nhận cập nhật chỉ số — {roomLabel(confirmRow.roomId, confirmRow.roomNumber)}
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  {confirmRow.invoicePaymentStatus === "UNPAID"
+                    ? `Hóa đơn kỳ ${monthLabel} của phòng này chưa được thanh toán. Khi xác nhận lưu, hệ thống sẽ cập nhật chỉ số mới và tự động tính lại hóa đơn cho khách thuê.`
+                    : `Phòng này đã có chỉ số chốt kỳ ${monthLabel}. Xác nhận ghi đè chỉ số mới?`}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-line bg-[#fafbf9] p-3 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-muted">Điện kỳ {monthLabel}:</span>
+                <b>
+                  {confirmRow.elecMeter.currentIndex ?? "Chưa có"} → {confirmRow.e} kWh
+                </b>
+              </div>
+              {!confirmRow.sharedMeter && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted">Nước kỳ {monthLabel}:</span>
+                  <b>
+                    {confirmRow.waterMeter.currentIndex ?? "Chưa có"} → {confirmRow.w} m³
+                  </b>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="secondary-button !h-9"
+                disabled={saving.has(confirmRow.roomKey)}
+                onClick={() => setConfirmRow(null)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="primary-button !h-9"
+                disabled={saving.has(confirmRow.roomKey)}
+                onClick={() => void executeSave(confirmRow)}
+              >
+                {saving.has(confirmRow.roomKey) ? "Đang cập nhật…" : "Xác nhận lưu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!canWrite && (
         <div className="alert alert-info mt-4">
           <Icon name="shield" size={18} />

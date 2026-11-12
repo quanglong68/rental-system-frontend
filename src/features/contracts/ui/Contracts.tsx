@@ -73,6 +73,22 @@ const TABS: { label: string; status?: ContractStatus }[] = [
   { label: "Đã kết thúc", status: "ENDED" },
 ];
 
+function DepositBadge({ contract }: { contract: Pick<Contract, "depositAmount" | "depositPaid" | "depositPaymentMethod" | "status"> }) {
+  if ((contract.depositAmount ?? 0) <= 0) {
+    return <Pill tone="slate">Không yêu cầu cọc</Pill>;
+  }
+  if (contract.depositPaid) {
+    if (contract.depositPaymentMethod === "VNPAY") {
+      return <Pill tone="teal">Đã cọc VNPay</Pill>;
+    }
+    if (contract.status === "ACTIVE") {
+      return <Pill tone="teal">Đã xác nhận CK</Pill>;
+    }
+    return <Pill tone="amber">Khách báo đã CK · Chờ đối soát</Pill>;
+  }
+  return <Pill tone="coral">Chưa thanh toán cọc</Pill>;
+}
+
 /** Backend trả LocalDate (yyyy-mm-dd); hiển thị nguyên ngày, không đổi múi giờ. */
 const fmtDate = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
 const errText = (e: unknown) => errorText(e);
@@ -285,6 +301,8 @@ function SignaturePanel({
   const tenantSignature = contract.signatures.find((s) => s.party === "TENANT") ?? null;
   const lessorSignature = contract.signatures.find((s) => s.party === "LESSOR") ?? null;
   const canSignNow = canWrite && contract.status === "DRAFT" && contract.signatureStatus === "AWAITING_LESSOR";
+  const depositPaidViaVnpay = Boolean(contract.depositPaid && contract.depositPaymentMethod === "VNPAY");
+  const depositReportedManual = Boolean(contract.depositPaid && !depositPaidViaVnpay);
 
   const openPdf = async () => {
     setOpening(true);
@@ -303,7 +321,7 @@ function SignaturePanel({
 
   const sign = async () => {
     const deposit = contract.depositAmount ?? 0;
-    if (deposit > 0 && !depositVerified) {
+    if (deposit > 0 && !depositPaidViaVnpay && !depositVerified) {
       return setError(`Vui lòng xác nhận bạn đã đối soát và nhận đủ ${vnd(deposit)} tiền cọc từ khách thuê trước khi ký.`);
     }
     if (!password.trim()) return setError("Nhập mật khẩu đăng nhập để xác nhận chữ ký.");
@@ -380,23 +398,39 @@ function SignaturePanel({
         <div className="mt-4 border-t border-line pt-3">
           <p className="mb-2 text-xs text-muted">Khách đã ký. Bên cho thuê ký sau để hợp đồng có hiệu lực.</p>
           {(contract.depositAmount ?? 0) > 0 && (
-            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              <div className="font-semibold flex items-center gap-1.5 mb-1">
-                <Icon name="wallet" size={15} /> Đối soát tiền cọc trước khi ký: {vnd(contract.depositAmount ?? 0)}
+            depositPaidViaVnpay ? (
+              <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <div className="font-semibold flex items-center gap-1.5 mb-1">
+                  <Icon name="check" size={15} className="text-emerald-600" /> Đã thanh toán tiền cọc qua VNPay: {vnd(contract.depositAmount ?? 0)}
+                </div>
+                <p className="text-emerald-800 m-0">
+                  Hệ thống đã xác nhận giao dịch thanh toán cọc trực tuyến{contract.depositTxnRef ? ` (Mã GD: ${contract.depositTxnRef})` : ""}.
+                </p>
               </div>
-              <p className="text-amber-800 mb-2">
-                Vui lòng kiểm tra biến động số dư tài khoản ngân hàng hoặc phiếu thu tiền mặt trước khi ký hoàn tất hợp đồng.
-              </p>
-              <label className="flex items-start gap-2 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={depositVerified}
-                  onChange={(e) => setDepositVerified(e.target.checked)}
-                />
-                <span>Đã xác nhận nhận đủ {vnd(contract.depositAmount ?? 0)} tiền cọc từ khách thuê.</span>
-              </label>
-            </div>
+            ) : (
+              <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="font-semibold flex items-center gap-1.5 mb-1">
+                  <Icon name="wallet" size={15} />
+                  {depositReportedManual
+                    ? `Khách đã xác nhận chuyển khoản cọc (${vnd(contract.depositAmount ?? 0)}) — Vui lòng đối soát`
+                    : `Đối soát tiền cọc trước khi ký: ${vnd(contract.depositAmount ?? 0)}`}
+                </div>
+                <p className="text-amber-800 mb-2">
+                  {depositReportedManual
+                    ? "Khách thuê đã tích \"Tôi đã chuyển tiền cọc\" khi ký. Vui lòng kiểm tra biến động số dư tài khoản ngân hàng hoặc phiếu thu trước khi ký hoàn tất hợp đồng."
+                    : "Vui lòng kiểm tra biến động số dư tài khoản ngân hàng hoặc phiếu thu tiền mặt trước khi ký hoàn tất hợp đồng."}
+                </p>
+                <label className="flex items-start gap-2 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={depositVerified}
+                    onChange={(e) => setDepositVerified(e.target.checked)}
+                  />
+                  <span>Đã xác nhận nhận đủ {vnd(contract.depositAmount ?? 0)} tiền cọc từ khách thuê.</span>
+                </label>
+              </div>
+            )
           )}
           <div className="space-y-3">
             <Field label="Mật khẩu đăng nhập để xác nhận chữ ký">
@@ -428,7 +462,7 @@ function SignaturePanel({
           <div className="mt-3 flex justify-end">
             <button
               className="primary-button !h-9"
-              disabled={busy || ((contract.depositAmount ?? 0) > 0 && !depositVerified)}
+              disabled={busy || ((contract.depositAmount ?? 0) > 0 && !depositPaidViaVnpay && !depositVerified)}
               onClick={() => void sign()}
             >
               <Icon name="check" size={15} /> {busy ? "Đang ký…" : "Ký hợp đồng"}
@@ -502,6 +536,18 @@ function Detail({
               <b>
                 {contract.depositAmount == null ? "—" : vnd(contract.depositAmount)}
                 <span className="ml-1 text-[11px] font-normal text-muted">(Giữ đến hết HĐ)</span>
+              </b>
+            </div>
+            <div>
+              <span>Trạng thái tiền cọc</span>
+              <b className="flex flex-wrap items-center gap-1.5">
+                <DepositBadge contract={contract} />
+                {contract.depositPaid && contract.depositPaidAt && (
+                  <span className="text-[11px] font-normal text-muted">· {toVNTime(contract.depositPaidAt, true)}</span>
+                )}
+                {contract.depositTxnRef && (
+                  <span className="font-mono text-[11px] font-normal text-muted">· {contract.depositTxnRef}</span>
+                )}
               </b>
             </div>
             {contract.electricityPrice != null && <div><span>Giá điện</span><b>{vnd(contract.electricityPrice)}/kWh</b></div>}
@@ -993,17 +1039,27 @@ export default function Contracts() {
                       {r.rentAmount == null ? "—" : vnd(r.rentAmount)}
                     </td>
                     <td className="text-right text-muted">
-                      <div>{r.depositAmount == null ? "—" : vnd(r.depositAmount)}</div>
-                      <span className="text-[10px] text-slate-500">Giữ đến hết HĐ</span>
+                      <div className="font-semibold text-text">{r.depositAmount == null ? "—" : vnd(r.depositAmount)}</div>
+                      <div className="mt-1 flex justify-end">
+                        <DepositBadge contract={r} />
+                      </div>
                     </td>
                     <td>
                       <div className="flex flex-col gap-1 items-start">
                         <StatusPill status={r.status} />
-                        {r.status === "DRAFT" && (
-                          <span className="text-[10px] font-medium text-slate-600">
-                            {signatureLabel[r.signatureStatus]}
+                        {r.status === "DRAFT" ? (
+                          r.signatureStatus === "AWAITING_LESSOR" ? (
+                            <Pill tone="amber">Cần quản lý ký</Pill>
+                          ) : (
+                            <span className="text-[10px] font-medium text-slate-600">
+                              {signatureLabel[r.signatureStatus]}
+                            </span>
+                          )
+                        ) : r.status === "ACTIVE" ? (
+                          <span className="text-[10px] font-medium text-emerald-700">
+                            Đã ký đủ 2 bên
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                     <td>

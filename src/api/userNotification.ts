@@ -85,3 +85,17 @@ export function notificationKind(type: string): string {
   if (/RentalRequest/.test(type)) return "Yêu cầu thuê";
   return "Hệ thống";
 }
+
+/** Đường dẫn điều hướng tương ứng trong khu vực quản trị khi bấm vào thông báo. */
+export function notificationAdminTarget(n: Pick<NotificationItem, "type" | "refType" | "refId">): string | null {
+  if (n.refType === "Contract" && n.refId != null) {
+    return `/admin/contracts?contractId=${encodeURIComponent(String(n.refId))}`;
+  }
+  if (n.type.startsWith("MeterReading")) {
+    return "/admin/meter-readings";
+  }
+  if (n.refType === "Invoice" && n.refId != null) {
+    return "/admin/invoices";
+  }
+  return null;
+}

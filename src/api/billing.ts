@@ -102,19 +102,27 @@ export type UpdateReadingRequest = {
 
 export type MeterIndexItem = {
   meterId: Id;
+  utilityTypeId?: Id | null;
   utilityTypeName: string | null;
+  unit?: string | null;
+  unitPrice?: number | null;
   initialIndex: number;
   initialIndexDate: string | null;
+  readingId?: Id | null;
+  prevIndex?: number | null;
+  prevIndexSource?: string | null;
   currentIndex: number | null;
 };
 
-/** Phòng có khách mới chuyển vào, kỹ thuật cần ghi chỉ số bàn giao. */
+/** Phòng có khách mới chuyển vào (hoặc vừa hoàn tất bàn giao trong kỳ), kỹ thuật ghi chỉ số bàn giao. */
 export type HandoverRoom = {
   contractId: Id;
   roomId: Id;
   buildingId: Id;
   roomNumber: string | null;
   moveInDate: string;
+  completed: boolean;
+  handoverDate?: string | null;
   meters: MeterIndexItem[];
 };
 
@@ -126,17 +134,37 @@ export type MissingReadingRoom = {
   meters: MeterIndexItem[];
 };
 
+export type InvoicePaymentStatus = "NONE" | "UNPAID" | "PAID";
+
+/** Phòng trong bảng chốt chỉ số kỳ hiện chọn kèm trạng thái hóa đơn và quyền sửa. */
+export type ClosingRoom = {
+  roomId: Id;
+  buildingId: Id;
+  roomNumber: string | null;
+  missingReading: boolean;
+  incomplete: boolean;
+  hasExistingReadings: boolean;
+  hasInvoice: boolean;
+  editable: boolean;
+  invoicePaymentStatus: InvoicePaymentStatus;
+  meters: MeterIndexItem[];
+};
+
 export type MeterReadingOverview = {
   month: number;
   year: number;
   dayOfMonth: number;
   firstFiveDays: boolean;
+  endOfMonthReminder: boolean;
+  futurePeriod: boolean;
   contractsAvailable: boolean;
   handoverRooms: HandoverRoom[];
   missingRooms: MissingReadingRoom[];
+  closingRooms: ClosingRoom[];
 };
 
 export type SaveHandoverRequest = {
+  contractId?: Id;
   roomId: Id;
   readingDate?: string;
   readings: { meterId: Id; currentIndex: number }[];
@@ -414,8 +442,13 @@ export const billingApi = {
       "/api/v1/payments/vnpay/create-url",
       { method: "POST", body }
     ),
+  createDepositVnpayUrl: (body: { contractId: Id; returnUrl?: string }) =>
+    apiFetch<{ paymentUrl: string; txnRef: string; contractId: Id; amount: number }>(
+      "/api/v1/payments/vnpay/deposit/create-url",
+      { method: "POST", body }
+    ),
   confirmVnpayPayment: (params: Record<string, string>) =>
-    apiFetch<{ success: boolean; message: string; invoiceId?: Id; amount?: number; txnRef?: string }>(
+    apiFetch<{ success: boolean; message: string; invoiceId?: Id; contractId?: Id; amount?: number; txnRef?: string }>(
       "/api/v1/payments/vnpay/confirm",
       { method: "POST", body: params }
     ),
