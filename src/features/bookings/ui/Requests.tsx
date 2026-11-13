@@ -44,6 +44,13 @@ const reasons = [
   "Lý do cá nhân khác",
 ];
 
+const moveOutStatusLabel: Record<MoveOutRequest["status"], string> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Bị từ chối",
+  COMPLETED: "Đã hoàn tất",
+};
+
 const newestFirst = <T,>(items: T[], getTime: (item: T) => string | null | undefined) =>
   [...items].sort((a, b) => {
     const ta = Date.parse(getTime(a) ?? "") || 0;
@@ -222,19 +229,20 @@ export default function Requests() {
     latestRenewal.status === "CANCELLED" ||
     renewalAbandoned;
   const latestMoveOut = activeContract
-    ? moveOuts.find((m) => sameId(m.contractId, activeContract.id)) ?? moveOuts[0] ?? null
-    : moveOuts[0] ?? null;
+    ? moveOuts.find((m) => sameId(m.contractId, activeContract.id)) ?? null
+    : null;
 
   // 30-day window calculation
   const remainingDays = activeContract?.endDate
     ? daysBetween(todayVN(), activeContract.endDate)
     : null;
-  const isEligibleWindow = remainingDays != null && remainingDays <= 30;
+  const isEligibleWindow = remainingDays != null && remainingDays <= 30 && remainingDays >= 0;
   const earliestEligibleDate = activeContract?.endDate
     ? new Date(Date.parse(`${activeContract.endDate}T00:00:00Z`) - 30 * 86400000)
         .toISOString()
         .slice(0, 10)
     : null;
+  const canSubmitMoveOut = isEligibleWindow && (latestMoveOut == null || latestMoveOut.status === "REJECTED");
 
   const handleCancelRequest = async (id: Id) => {
     try {
@@ -656,20 +664,18 @@ export default function Requests() {
                         Theo quy định hệ thống, chức năng trả phòng hoặc gia hạn hợp đồng chỉ mở trước ngày kết thúc hợp đồng tối đa <b>30 ngày</b> (bắt đầu mở từ ngày <b>{fmtDate(earliestEligibleDate)}</b>).
                       </p>
                     </div>
-                  ) : latestMoveOut ? (
-                    /* Trạng thái yêu cầu trả phòng hiện tại */
-                    <div className="mt-6 rounded-2xl border border-teal-200 bg-teal-50/50 p-6 space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-teal-200/70 pb-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className="font-bold text-teal-950 text-base">Yêu cầu trả phòng #{latestMoveOut.id}</span>
-                          <span className={`cx-badge ${latestMoveOut.status === "APPROVED" ? "success" : latestMoveOut.status === "PENDING" ? "warning" : "danger"}`}>
-                            {latestMoveOut.status === "APPROVED"
-                              ? "Đã duyệt"
-                              : latestMoveOut.status === "PENDING"
-                              ? "Chờ duyệt"
-                              : latestMoveOut.status}
-                          </span>
-                        </div>
+                  ) : (
+                    <>
+                      {latestMoveOut && (
+                        /* Trạng thái yêu cầu trả phòng hiện tại */
+                        <div className="mt-6 rounded-2xl border border-teal-200 bg-teal-50/50 p-6 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-teal-200/70 pb-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="font-bold text-teal-950 text-base">Yêu cầu trả phòng #{latestMoveOut.id}</span>
+                              <span className={`cx-badge ${latestMoveOut.status === "APPROVED" ? "success" : latestMoveOut.status === "PENDING" ? "warning" : latestMoveOut.status === "COMPLETED" ? "muted" : "danger"}`}>
+                                {moveOutStatusLabel[latestMoveOut.status]}
+                              </span>
+                            </div>
                         {latestMoveOut.createdAt && (
                           <span className="text-xs text-muted">
                             Gửi lúc: <b>{toVNTime(latestMoveOut.createdAt, true)}</b>
@@ -683,13 +689,15 @@ export default function Requests() {
                           <b className="text-sm text-slate-900">{fmtDate(latestMoveOut.expectedMoveOutDate)}</b>
                         </div>
                         <div>
-                          <span className="text-muted block">Lý do trả phòng:</span>
+                          <span className="text-muted block">
+                            {latestMoveOut.status === "REJECTED" ? "Phản hồi từ Ban quản lý:" : "Lý do trả phòng:"}
+                          </span>
                           <b className="text-slate-800">{latestMoveOut.reason || "Không ghi"}</b>
                         </div>
                       </div>
 
-                      {/* Thông tin quyết toán hoàn cọc */}
-                      {latestMoveOut.refundStatus === "REFUNDED" ? (
+                      {/* Thông tin quyết toán hoàn cọc (không áp dụng cho yêu cầu bị từ chối) */}
+                      {latestMoveOut.status !== "REJECTED" && (latestMoveOut.refundStatus === "REFUNDED" ? (
                         <div className="mt-4 rounded-xl bg-white p-4 border border-emerald-300 shadow-xs space-y-2.5">
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-slate-700 text-xs">Tiền cọc thực hoàn:</span>
@@ -732,11 +740,24 @@ export default function Requests() {
                         <div className="rounded-xl bg-white/70 p-4 border border-teal-200 text-xs text-teal-900">
                           Ban quản lý sẽ chốt chỉ số điện nước cuối cùng và chuyển hoàn cọc ngay sau khi nhận bàn giao phòng vào ngày hẹn.
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ) : (
-                    /* Form nộp yêu cầu trả phòng mới */
-                    <div className="mt-6 space-y-4">
+                  )}
+
+                      {latestMoveOut?.status === "REJECTED" && (
+                        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-900">
+                          <div className="flex items-center gap-1.5 font-bold text-rose-900 mb-1">
+                            <Icon name="alert" size={16} /> Yêu cầu trả phòng bị từ chối
+                          </div>
+                          <p className="m-0 leading-relaxed">
+                            Bạn có thể chọn ngày mới và bấm <b>Gửi lại yêu cầu trả phòng</b> bên dưới. Yêu cầu mới sẽ được Ban quản lý xét duyệt lại từ đầu.
+                          </p>
+                        </div>
+                      )}
+
+                      {canSubmitMoveOut && (
+                        /* Form nộp yêu cầu trả phòng */
+                        <div className="mt-6 space-y-4">
                       <div className="rounded-xl border border-emerald-300 bg-emerald-50/90 p-4 text-xs text-emerald-950">
                         <div className="flex items-center gap-1.5 font-bold text-emerald-950 mb-1">
                           <Icon name="check" size={16} /> Đủ điều kiện hoàn trả tiền đặt cọc (100%)
@@ -796,9 +817,15 @@ export default function Requests() {
                         disabled={moveOutBusy || !moveOutDate}
                         onClick={handleCreateMoveOut}
                       >
-                        {moveOutBusy ? "Đang gửi yêu cầu…" : "Gửi yêu cầu trả phòng"}
+                        {moveOutBusy
+                          ? "Đang gửi yêu cầu…"
+                          : latestMoveOut?.status === "REJECTED"
+                            ? "Gửi lại yêu cầu trả phòng"
+                            : "Gửi yêu cầu trả phòng"}
                       </button>
-                    </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </>

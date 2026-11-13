@@ -1549,7 +1549,9 @@ export function HomeExtras({
                               ? `Đã gửi yêu cầu hẹn trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}. Đang chờ Ban quản lý xét duyệt.`
                               : latestMoveOut.status === "APPROVED"
                                 ? `Đã duyệt trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}. Xem chi tiết hoàn trả tiền cọc.`
-                                : `Yêu cầu trả phòng: ${moveOutLabel[latestMoveOut.status]}.`
+                                : latestMoveOut.status === "REJECTED"
+                                  ? `Yêu cầu trả phòng ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)} đã bị Ban quản lý từ chối${latestMoveOut.reason ? `: ${latestMoveOut.reason}` : "."} Bạn có thể gửi lại yêu cầu mới.`
+                                  : `Yêu cầu trả phòng đã hoàn tất ngày ${fmtDate(latestMoveOut.expectedMoveOutDate)}.`
                           ) : (
                             `Hợp đồng hết hạn vào ngày ${fmtDate(selected.endDate)}. Bạn có thể nộp yêu cầu trả phòng trước ngày kết thúc tối đa 30 ngày.`
                           )}
@@ -1560,7 +1562,7 @@ export function HomeExtras({
                         className="cx-btn secondary !h-9 text-xs w-full flex items-center justify-center gap-1.5"
                         onClick={() => navigate("/requests?tab=move-outs")}
                       >
-                        Quản lý yêu cầu trả phòng <Icon name="chevron" size={14} />
+                        {latestMoveOut?.status === "REJECTED" ? "Gửi lại yêu cầu trả phòng" : "Quản lý yêu cầu trả phòng"} <Icon name="chevron" size={14} />
                       </button>
                     </div>
 
